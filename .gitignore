@@ -1,6 +1,8 @@
-B1;3201;0c# Object files
+# Object files
 *.o
 *.ko
+*.obj
+*.elf
 
 # Libraries
 *.lib
@@ -16,6 +18,9 @@ B1;3201;0c# Object files
 *.exe
 *.out
 *.app
+*.i*86
+*.x86_64
+*.hex
 
 # Eclipse
 Debug
