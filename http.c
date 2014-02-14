@@ -299,11 +299,11 @@ int read_request_line(HTTP_Message* message, FILE* connection)
 
 	AutoBuffer buffer = init_autobuf;
 
-	//Magic line number 1: Read up to a CR LF, autoallocating as nessesary
-	if(read_line(&buffer, connection))
+	//Read up to a CR LF, autoallocating as nessesary
+	if(autobuf_read_line(&buffer, connection))
 		READ_RETURN(connection_error);
 
-	//Magic line number 2: Match the regex
+	//Match the regex
 	RegexMatches matches;
 	if(regex_match(&request_regex, &matches, buffer.storage_begin) == REG_NOMATCH)
 		READ_RETURN(malformed_line);
@@ -320,10 +320,9 @@ int read_request_line(HTTP_Message* message, FILE* connection)
 
 	//Verify and get the HTTP version
 	const char* http_version = match_begin(&matches, request_match_version);
-	//Must be "X.Y", where X is 1 and Y is 0 or 1
-	if(!(match_length(&matches, request_match_version) == 3 &&
-			http_version[0] == '1' &&
-			(http_version[2] == '0' || http_version[2] == '1')))
+
+	//Must be 1.1 or 1.0
+	if(strncmp("1.1", http_version, 3) && strncmp("1.0", http_version, 3))
 		READ_RETURN(bad_version);
 	message->request.http_version = http_version[2];
 
@@ -334,6 +333,7 @@ int read_request_line(HTTP_Message* message, FILE* connection)
 	message->request.path = copy_regex_part(&matches, request_match_path);
 
 	READ_RETURN(read_success);
+#undef READ_RETURN
 }
 
 ///////////////////////////////////////////////////////////////////////////////

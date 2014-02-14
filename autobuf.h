@@ -22,10 +22,9 @@ typedef struct
  */
 static const AutoBuffer init_autobuf;
 
-extern const int READ_LINE_SUCESS;
-extern const int READ_LINE_EOF;
-extern const int READ_LINE_ERROR;
+extern const int read_line_eof;
+extern const int read_line_error;
 /*
  * Read a line up to CR LF, reallocating as nessesary.
  */
-int read_line(AutoBuffer* buffer, FILE* connection);
+int autobuf_read_line(AutoBuffer* buffer, FILE* connection);
