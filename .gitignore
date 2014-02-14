@@ -1,4 +1,4 @@
-# Object files
+B1;3201;0c# Object files
 *.o
 *.ko
 
@@ -16,3 +16,10 @@
 *.exe
 *.out
 *.app
+
+# Eclipse
+Debug
+Release
+.settings
+.cproject
+.project
