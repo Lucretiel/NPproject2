@@ -12,7 +12,7 @@
 #include <regex.h>
 
 #include "http.h"
-#include "readable_regex.h"
+#include "ReadableRegex/readable_regex.h"
 #include "autobuf.h"
 
 ///////////////////////////////////////////////////////////////////////////////

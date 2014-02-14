@@ -1,0 +1,3 @@
+[submodule "ReadableRegex"]
+	path = ReadableRegex
+	url = https://github.com/Lucretiel/ReadableRegex.git
