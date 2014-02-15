@@ -16,6 +16,11 @@
 
 #include "http.h"
 
+char* copy_string(const char* str)
+{
+	return strcpy(malloc(strlen(str) + 1), str);
+}
+
 int main(int argc, char **argv)
 {
 	init_http();
@@ -73,7 +78,11 @@ int main(int argc, char **argv)
 
 		printf("Clearing HTTP request\n");
 		clear_request(&message);
-
+/*
+		printf("Creating response\n");
+		message.response.http_version = '1';
+		message.response.status =
+*/
 		printf("Closing Socket\n");
 		fclose(connection);
 	}

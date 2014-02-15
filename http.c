@@ -79,8 +79,8 @@ enum
 
 //Note that regexes are compiled to be case-insensitive
 
-#define SPACE " "
-#define CR_LF "\r\n"
+#define LWS "[ \t]"
+#define CR_LF "\r?\n"
 
 /*
  * Note to the reader: POSIX ERE are... not fun. They don't support non-
@@ -119,44 +119,38 @@ enum
  */
 
 #define REGEX_COMPILE(COMPONENT, CONTENT) \
-	x = regcomp((COMPONENT), FULL_ANCHOR(CONTENT), REG_ICASE | REG_EXTENDED)
+	regcomp((COMPONENT), FULL_ANCHOR(CONTENT), REG_ICASE | REG_EXTENDED)
 
 //Compile regular expressions
 void init_http()
 {
-	int x;
 	//REQUEST LINE REGEX
 	REGEX_COMPILE(&request_regex,
 		SUBMATCH(AT_LEAST_ONE("[A-Z]")) //METHOD: index 1
-		SPACE
+		AT_LEAST_ONE(LWS)
 		OPTIONAL(SUBMATCH("http://" MANY(URI_DOMAIN_CHARACTER))) //DOMAIN: index 2
 		"/" SUBMATCH(MANY(URI_PATH_CHARACTER)) //PATH: index 5
-		SPACE
+		AT_LEAST_ONE(LWS)
 		HTTP_VERSION //HTTP VERSION: index 8
 		CR_LF);
 
 	//RESPONSE LINE REGEX
 	REGEX_COMPILE(&response_regex,
 		HTTP_VERSION //HTTP VERSION: index 1
-		SPACE
+		AT_LEAST_ONE(LWS)
 		SUBMATCH("[1-5][0-9][0-9]") //RESPONSE CODE: index 2
-		SPACE
+		AT_LEAST_ONE(LWS)
 		SUBMATCH(MANY("[[:print:]]")) //REASON PHRASE: index 3
 		CR_LF);
 
+	//TODO: support header folding
 	//HEADER REGEX
 	REGEX_COMPILE(&header_regex,
 		OPTIONAL( SUBMATCH( //The whole header is optional.
 			SUBMATCH(AT_LEAST_ONE(HEADER_NAME_CHARACTER)) //NAME: index 2
-			":" MANY(" ")
-			SUBMATCH(MANY("[[:print:]]")))) //VALUE: index 3
+			":" MANY(LWS)
+			SUBMATCH(MANY("[[:print:]\t]")))) //VALUE: index 3
 		CR_LF);
-	/*
-	 * Header name can be any set of printable characters, no whitespace. Header
-	 * body is the same, but it can also have spaces.
-	 *
-	 * TODO: Tabs? funky header newlines?
-	 */
 }
 
 //Struct linking group matches to a char*, to make finding submatches easier
