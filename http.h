@@ -10,7 +10,7 @@
 #ifndef HTTP_COMMON_H_
 #define HTTP_COMMON_H_
 
-#include <stdio.h>
+#include <stdio.h> //For FILE*
 
 typedef struct
 {

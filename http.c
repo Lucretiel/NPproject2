@@ -87,33 +87,31 @@ enum
 
 #define HTTP_VERSION \
 	"HTTP/" SUBMATCH( \
-		AT_LEAST_ONE("[0-9]") \
+		"[0-9]+" \
 		"\\." \
-		AT_LEAST_ONE("[0-9]"))
+		"[0-9]+")
 
 #define URI_CHARACTER \
 	GROUP( EITHER( \
-		CLASS( \
-			"a-z0-9"               /* ALPHANUMERICS */ \
-			"._~:/?#[@!$&'()*+,;=" /* PUNCTUATION */ \
-			"\\]\\-"               /* ESCAPED PUNCTUATION */ \
-		), \
-		"%" EXACTLY(2, "[0-9a-f]"))) /* PERCENT ENCODED CHARACTER */
+		CLASS("]a-z0-9._~:/?#[@!$&'()*+,;=-"), \
+		GROUP("%" EXACTLY(2, "[0-9a-f]")))) /* PERCENT ENCODED CHARACTER */
+
 /*
  * Regex compiler wrapper. This could be a function, but I'd like to be able to
  * use the FILLED_REGEX macro, which requires a string literal
  */
 #define REGEX_COMPILE(COMPONENT, CONTENT) \
-	regcomp((COMPONENT), FULL_ANCHOR(CONTENT), REG_ICASE | REG_EXTENDED)
+	regcomp((COMPONENT), CONTENT, REG_ICASE | REG_EXTENDED)
 
 //Compile regular expressions
 void init_http()
 {
 	//REQUEST LINE REGEX
+
 	REGEX_COMPILE(&request_regex,
 		SUBMATCH(AT_LEAST_ONE("[A-Z]")) //METHOD
 		SPACE
-		OPTIONAL(SUBMATCH("http://" MINIMAL(MANY(URI_CHARACTER)))) //DOMAIN
+		OPTIONAL(SUBMATCH("http://" MINIMAL(MANY(URI_CHARACTER))))
 		"/" SUBMATCH(MANY(URI_CHARACTER)) //PATH
 		SPACE
 		HTTP_VERSION //HTTP VERSION
@@ -132,7 +130,7 @@ void init_http()
 	REGEX_COMPILE(&header_regex,
 		OPTIONAL( GROUP( //The whole header is optional.
 			SUBMATCH(MINIMAL(AT_LEAST_ONE("[[:graph:]]"))) //NAME
-			":" MANY("[ \t]")
+			":" MANY(" ")
 			SUBMATCH(MANY("[[:print:]]")))) //VALUE
 		CR_LF);
 	/*
@@ -153,11 +151,8 @@ typedef struct
 
 inline static int regex_match(const regex_t* regex, RegexMatches* matches, const char* str)
 {
-	return regexec(
-		regex,
-		matches->string = str,
-		max_groups,
-		matches->matches, 0);
+	matches->string = str;
+	return regexec(regex, str, max_groups, matches->matches, 0);
 }
 
 //Get a pointer to the beginning of the submatch
