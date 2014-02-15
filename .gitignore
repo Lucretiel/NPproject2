@@ -23,8 +23,9 @@
 *.hex
 
 # Eclipse
-Debug
-Release
 .settings
 .cproject
 .project
+/HTTPTest
+/Debug
+/Release
