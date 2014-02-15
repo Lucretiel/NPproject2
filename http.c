@@ -55,29 +55,26 @@ static regex_t header_regex;
 
 enum
 {
-	request_match_all,
-	request_match_method,
-	request_match_domain,
-	request_match_path,
-	request_match_version,
-	num_request_matches
+	request_match_all=0,
+	request_match_method=1,
+	request_match_domain=2,
+	request_match_path=5,
+	request_match_version=8
 };
 
 enum
 {
-	response_match_all,
-	response_match_version,
-	response_match_status,
-	response_match_phrase,
-	num_response_matches
+	response_match_all=0,
+	response_match_version=1,
+	response_match_status=2,
+	response_match_phrase=3
 };
 
 enum
 {
-	header_match_all,
-	header_match_name,
-	header_match_value,
-	num_header_matches
+	header_match_all=0,
+	header_match_name=2,
+	header_match_value=3
 };
 
 //Note that regexes are compiled to be case-insensitive
@@ -85,53 +82,74 @@ enum
 #define SPACE " "
 #define CR_LF "\r\n"
 
+/*
+ * Note to the reader: POSIX ERE are... not fun. They don't support non-
+ * capturing groups (?:...), lazy captures (*?, +?), or character class set
+ * operations (subtraction: [a-x-[aeiou]]. The lack of non-capturing groups is
+ * especially problematic, as it means that we have to keep track of group
+ * numbers; this is done in the comments, as "//+number" under each one.
+ */
 #define HTTP_VERSION \
 	"HTTP/" SUBMATCH( \
 		"[0-9]+" \
 		"\\." \
 		"[0-9]+")
+//+1
 
-#define URI_CHARACTER \
-	GROUP( EITHER( \
-		CLASS("]a-z0-9._~:/?#[@!$&'()*+,;=-"), \
-		GROUP("%" EXACTLY(2, "[0-9a-f]")))) /* PERCENT ENCODED CHARACTER */
+#define URI_PATH_CHARACTER \
+	SUBMATCH( EITHER( \
+		CLASS("]a-z0-9._~:/?#[@!$&'()*+,;=-"), /* NORMAL CHARACTER */ \
+		SUBMATCH("%[0-9a-f]{2}"))) /* PERCENT ENCODED CHARACTER */
+//+2
+
+//As above, without slash
+#define URI_DOMAIN_CHARACTER \
+	SUBMATCH( EITHER( \
+		CLASS("]a-z0-9._~:?#[@!$&'()*+,;=-"), \
+		SUBMATCH("%[0-9a-f]{2}")))
+//+2
+
+//Letters, numbers, and punctuation, except colon
+#define HEADER_NAME_CHARACTER \
+	CLASS("]a-z0-9!\"#$%&'()*+,\\./;<=>?@\[^_`{|}~-")
 
 /*
  * Regex compiler wrapper. This could be a function, but I'd like to be able to
  * use the FILLED_REGEX macro, which requires a string literal
  */
+
 #define REGEX_COMPILE(COMPONENT, CONTENT) \
-	regcomp((COMPONENT), CONTENT, REG_ICASE | REG_EXTENDED)
+	x = regcomp((COMPONENT), FULL_ANCHOR(CONTENT), REG_ICASE | REG_EXTENDED)
 
 //Compile regular expressions
 void init_http()
 {
+	int x;
 	//REQUEST LINE REGEX
-
 	REGEX_COMPILE(&request_regex,
-		SUBMATCH(AT_LEAST_ONE("[A-Z]")) //METHOD
+		SUBMATCH(AT_LEAST_ONE("[A-Z]")) //METHOD: index 1
 		SPACE
-		OPTIONAL(SUBMATCH("http://" MINIMAL(MANY(URI_CHARACTER))))
-		"/" SUBMATCH(MANY(URI_CHARACTER)) //PATH
+		OPTIONAL(SUBMATCH("http://" MANY(URI_DOMAIN_CHARACTER))) //DOMAIN: index 2
+		"/" SUBMATCH(MANY(URI_PATH_CHARACTER)) //PATH: index 5
 		SPACE
-		HTTP_VERSION //HTTP VERSION
+		HTTP_VERSION //HTTP VERSION: index 8
 		CR_LF);
 
 	//RESPONSE LINE REGEX
 	REGEX_COMPILE(&response_regex,
-		HTTP_VERSION //HTTP VERSION
+		HTTP_VERSION //HTTP VERSION: index 1
 		SPACE
-		SUBMATCH("[1-5][0-9][0-9]") //RESPONSE CODE
+		SUBMATCH("[1-5][0-9][0-9]") //RESPONSE CODE: index 2
 		SPACE
-		SUBMATCH(MANY("[[:print:]]")) //REASON PHRASE
+		SUBMATCH(MANY("[[:print:]]")) //REASON PHRASE: index 3
 		CR_LF);
 
 	//HEADER REGEX
 	REGEX_COMPILE(&header_regex,
-		OPTIONAL( GROUP( //The whole header is optional.
-			SUBMATCH(MINIMAL(AT_LEAST_ONE("[[:graph:]]"))) //NAME
+		OPTIONAL( SUBMATCH( //The whole header is optional.
+			SUBMATCH(AT_LEAST_ONE(HEADER_NAME_CHARACTER)) //NAME: index 2
 			":" MANY(" ")
-			SUBMATCH(MANY("[[:print:]]")))) //VALUE
+			SUBMATCH(MANY("[[:print:]]")))) //VALUE: index 3
 		CR_LF);
 	/*
 	 * Header name can be any set of printable characters, no whitespace. Header
@@ -394,13 +412,17 @@ typedef struct _linked_header
 	struct _linked_header* next;
 } LinkedHeader;
 
-void free_linked_headers(LinkedHeader* base)
+//if free_strings is nonzero, free the strings
+static inline void free_linked_headers(LinkedHeader* base, int free_strings)
 {
 	if(base)
 	{
-		free_linked_headers(base->next);
-		free(base->header.name);
-		free(base->header.value);
+		free_linked_headers(base->next, free_strings);
+		if(free_strings)
+		{
+			free(base->header.name);
+			free(base->header.value);
+		}
 		free(base);
 	}
 }
@@ -415,10 +437,10 @@ int read_headers(HTTP_Message* message, FILE* connection)
 	AutoBuffer buffer = init_autobuf;
 
 	#define RETURN(CODE) { free(buffer.storage_begin); \
-		free_linked_headers(headers_base.next); message->num_headers=0; \
-		return (CODE); }
+		free_linked_headers(headers_base.next, (CODE)); return (CODE); }
 
-	while(true)
+	int num_headers;
+	for(num_headers = 0; ; ++num_headers)
 	{
 		if(autobuf_read_line(&buffer, connection))
 			RETURN(connection_error);
@@ -439,11 +461,10 @@ int read_headers(HTTP_Message* message, FILE* connection)
 		headers_front = new_header;
 
 		//TODO: detect Content-Length
-
-		++message->num_headers;
 	}
 
-	message->headers = calloc(sizeof(HTTP_Header), message->num_headers);
+	message->num_headers = num_headers;
+	message->headers = calloc(sizeof(HTTP_Header), num_headers);
 
 	/*
 	 * BOY IT SURE WOULD BE NICE IF WE HAD STANDARD ALGORITHMS OR SOMETHING

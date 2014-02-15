@@ -64,7 +64,7 @@ int main(int argc, char **argv)
 		read_headers(&message, connection);
 		printf("Got %d headers\n", message.num_headers);
 		for(int i = 0; i < message.num_headers; ++i)
-			printf("\t%s: %s", message.headers[i].name, message.headers[i].value);
+			printf("\t%s: %s\n", message.headers[i].name, message.headers[i].value);
 
 		printf("Reading HTTP body\n");
 		read_body(&message, connection);
