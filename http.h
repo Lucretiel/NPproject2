@@ -24,7 +24,7 @@ typedef struct
 typedef struct
 {
 	int status;
-	char* reason;
+	char* phrase;
 	char http_version; //0->1.0, 1->1.1
 } HTTP_RespLine;
 
@@ -42,10 +42,11 @@ typedef struct
 		HTTP_RespLine response;
 	};
 
-	int num_headers;
+	//dynamic array of HTTP_Header
 	HTTP_Header* headers;
+	int num_headers;
 
-	int body_length;
+	size_t body_length;
 	char* body;
 } HTTP_Message;
 
@@ -53,18 +54,18 @@ typedef struct
 /*
  * Must be called in order. Request/response -> headers -> body -> clear.
  * Clear can be called any time after the initial call to read_*_line.
- * You must have a fully populated data structure to use the writes.
  */
 
-extern const int read_success;
-extern const int connection_error;
+extern const int connection_error; //EOF or other connection issue
 
-extern const int malformed_line;
-extern const int malformed_header;
+extern const int malformed_line; //regex didn't match request/response line
+extern const int malformed_header; //regex didn't match header line
 
-extern const int bad_method;
-extern const int bad_version;
-extern const int bad_status;
+extern const int bad_method; //method isn't GET, HEAD, or POST
+extern const int bad_version; //HTTP version isn't 1.0 or 1.1
+
+extern const int no_content_length; //content length header isn't present
+extern const int bad_content_length; //content length header is invalid
 
 int read_request_line(HTTP_Message*, FILE*);
 int read_response_line(HTTP_Message*, FILE*);
@@ -76,6 +77,8 @@ int write_response(HTTP_Message*, FILE*);
 
 void clear_request(HTTP_Message*);
 void clear_response(HTTP_Message*);
+
+HTTP_Header* find_header(HTTP_Message*, const char*);
 
 //Call this ONCE PER PROGRAM. Before threads.
 void init_http();

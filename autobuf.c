@@ -64,6 +64,11 @@ int autobuf_read_line(AutoBuffer* buffer, FILE* connection)
 
 	do
 	{
+		/*
+		 * TODO: potentially add a predicate, to ensure incoming lines are
+		 * valid. For instance, for the HTTP request, fail immediatly if an
+		 * invalid character comes in.
+		 */
 		//Check for EOF
 		if(feof(connection))
 			return read_line_eof;
@@ -83,7 +88,7 @@ int autobuf_read_line(AutoBuffer* buffer, FILE* connection)
 		buffer->read_point += strlen(buffer->read_point);
 		
 		//Continue looping if we don't have a CR-LF
-	} while(strcmp(buffer->read_point[-2], "\r\n"));
+	} while(strcmp(buffer->read_point - 2, "\r\n"));
 
 	return 0;
 }
