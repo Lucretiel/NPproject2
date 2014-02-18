@@ -161,6 +161,7 @@ typedef struct
 	regmatch_t matches[max_groups];
 } RegexMatches;
 
+//Perform a match
 inline static int regex_match(const regex_t* regex, RegexMatches* matches, const char* str)
 {
 	matches->string = str;
@@ -194,12 +195,29 @@ inline static char* copy_regex_part(const RegexMatches* matches, int which)
 		//I wonder what happens if you memcpy(0, ...)
 		//Oh well.
 		return memcpy(
-			calloc(
-				match_length(matches, which) + 1, sizeof(char)),
+			calloc(match_length(matches, which) + 1, sizeof(char)),
 			match_begin(matches, which),
 			match_length(matches, which));
 	else
 		return 0;
+}
+
+//Perform a string comparison to a match part
+inline static bool compare_regex_part(const char* value,
+		const RegexMatches* matches, int which)
+{
+	return strncmp(value,
+		match_begin(matches, which),
+		match_length(matches, which)) == 0;
+}
+
+//Perform a case-insensitive comparison to a match part
+inline static bool case_compare_regex_part(const char* value,
+		const RegexMatches* matches, int which)
+{
+	return strncasecmp(value,
+		match_begin(matches, which),
+		match_length(matches, which));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -264,7 +282,8 @@ static inline int write_common(HTTP_Message* message, FILE* connection)
 	if(message->body)
 		fwrite(message->body, sizeof(char), message->body_length, connection);
 
-	//flush?
+	//flush
+	fflush(connection);
 
 	return 0;
 }
@@ -306,9 +325,7 @@ const int bad_content_length = 7;
 //True if the method in the request matches the method given
 static inline bool is_method(const char* method, const RegexMatches* matches)
 {
-	return strncasecmp(method,
-		match_begin(matches, request_match_method),
-		match_length(matches, request_match_method)) == 0;
+	return case_compare_regex_part(method, matches, request_match_method);
 }
 
 //TODO: find a way to share AutoBuffers between read calls, to reduce allocations
@@ -342,12 +359,17 @@ int read_request_line(HTTP_Message* message, FILE* connection)
 		RETURN(bad_method);
 
 	//Verify and get the HTTP version
-	const char* http_version = match_begin(&matches, request_match_version);
-
 	//Must be 1.0 or 1.1
-	if(strncmp("1.0", http_version, 3) && strncmp("1.1", http_version, 3))
+	if(!(compare_regex_part("1.0", &matches, request_match_version) ||
+			compare_regex_part("1.1", &matches, request_match_version)))
+	{
 		RETURN(bad_version);
-	message->request.http_version = http_version[2];
+	}
+	else
+	{
+		const char* http_version = match_begin(&matches, request_match_version);
+		message->request.http_version = http_version[2];
+	}
 
 	//Get the domain
 	message->request.domain = copy_regex_part(&matches, request_match_domain);
@@ -379,11 +401,17 @@ int read_response_line(HTTP_Message* message, FILE* connection)
 
 	//TODO: reduce code repitition between here and request
 	//Verify and get the HTTP version
-	match_ptr = match_begin(&matches, response_match_version);
-
-	if(strncmp("1.0", match_ptr, 3) && strncmp("1.1", match_ptr, 3))
+	//Must be 1.0 or 1.1
+	if(!(compare_regex_part("1.0", &matches, response_match_version) ||
+			compare_regex_part("1.1", &matches, response_match_version)))
+	{
 		RETURN(bad_version);
-	message->response.http_version = match_ptr[2];
+	}
+	else
+	{
+		const char* http_version = match_begin(&matches, response_match_version);
+		message->response.http_version = http_version[2];
+	}
 
 	/*
 	 * Get the status code. We know from the regex that it's a valid 3 digit
@@ -394,87 +422,86 @@ int read_response_line(HTTP_Message* message, FILE* connection)
 
 	//Get the status phrase
 	//TODO: Pick from a table instead?
-	message->response.phrase =copy_regex_part(&matches, response_match_phrase);
+	message->response.phrase = copy_regex_part(&matches, response_match_phrase);
 
 	RETURN(0);
 	#undef RETURN
 }
 
-typedef struct _linked_header
+/*
+ * Recursive function to get and parse all headers, dynamically allocate an
+ * array, and store all the headers. Recursion is used to store all the local
+ * header pointers until the total number of headers is known. If there is
+ * an error, the error code is returned and no memory is allocated
+ */
+int get_headers(int* num_headers, HTTP_Header** headers,
+		AutoBuffer* buffer, FILE* connection, int depth)
 {
-	HTTP_Header header;
-	struct _linked_header* next;
-} LinkedHeader;
+	//TODO: size/recursion limit
+	//Read next line, return if error
+	if(autobuf_read_line(buffer, connection))
+		return connection_error;
 
-//if free_strings is nonzero, free the strings
-static inline void free_linked_headers(LinkedHeader* base, int free_strings)
-{
-	if(base)
+	//Parse line, return if error
+	RegexMatches matches;
+	if(regex_match(&header_regex, &matches, buffer->storage_begin) == REG_NOMATCH)
+		return malformed_header;
+
+	//If this is not the empty end-of-headers line
+	if(strcmp("\r\n", match_begin(&matches, header_match_all)))
 	{
-		free_linked_headers(base->next, free_strings);
-		if(free_strings)
+		//Copy the header name and value.
+		HTTP_Header local_header;
+		local_header.name = copy_regex_part(&matches, header_match_name);
+		local_header.value = copy_regex_part(&matches, header_match_value);
+
+		//Recurse. Parse all remaining headers, then create the array.
+		int error = get_headers(num_headers, headers, buffer, connection, depth+1);
+
+		//If there was an error, free the local storage and pass it up
+		//cough cough it sure would be nice if we had exceptions cough
+		if(error)
 		{
-			free(base->header.name);
-			free(base->header.value);
+			free(local_header.name);
+			free(local_header.value);
+			return error;
 		}
-		free(base);
+		//If there was no error, store the name and value in the array
+		else
+		{
+			(*headers)[depth] = local_header;
+			return 0;
+		}
+	}
+	//If this is the empty end-of-headers line
+	else
+	{
+		//Allocate the array, set the num_headers value
+		*headers = depth ? malloc(sizeof(HTTP_Header) * depth) : 0;
+		*num_headers = depth;
+		return 0;
 	}
 }
 
 int read_headers(HTTP_Message* message, FILE* connection)
 {
-	//TODO: reduce the number of copies going on
-	LinkedHeader headers_base = {{0, 0}, 0};
-	LinkedHeader* headers_front = &headers_base;
-
 	//Reuse the allocated buffer for each header
 	AutoBuffer buffer = init_autobuf;
 
-	#define RETURN(CODE) { free(buffer.storage_begin); \
-		free_linked_headers(headers_base.next, (CODE)); return (CODE); }
-
-	int num_headers;
-	for(num_headers = 0; ; ++num_headers)
-	{
-		if(autobuf_read_line(&buffer, connection))
-			RETURN(connection_error);
-
-		RegexMatches matches;
-		if(regex_match(&header_regex, &matches, buffer.storage_begin) ==
-				REG_NOMATCH)
-			RETURN(malformed_header);
-
-		if(strcmp("\r\n", match_begin(&matches, header_match_all)) == 0)
-			break;
-
-		LinkedHeader* new_header = calloc(sizeof(LinkedHeader), 1);
-		new_header->header.name = copy_regex_part(&matches, header_match_name);
-		new_header->header.value = copy_regex_part(&matches, header_match_value);
-
-		headers_front->next = new_header;
-		headers_front = new_header;
-
-		//TODO: detect Content-Length
-	}
-
-	message->num_headers = num_headers;
-	message->headers = calloc(sizeof(HTTP_Header), num_headers);
+	message->headers = 0;
+	message->num_headers = 0;
 
 	/*
-	 * BOY IT SURE WOULD BE NICE IF WE HAD STANDARD ALGORITHMS OR SOMETHING
+	 * Initiate the recursive call. This function call will fill
+	 * message->headers and message->num_headers with a dynamic array and
+	 * the count. If there is an error, nothing is allocated and these values
+	 *
 	 */
+	int error = get_headers(&message->num_headers, &message->headers, &buffer,
+			connection, 0);
+	free(buffer.storage_begin);
+	return error;
 
-	/*
-	 * OR A DYNAMIC ARRAY SO WE COULD AVOID ALL THIS SHIT
-	 */
-
-	LinkedHeader* iterate_link = headers_base.next;
-	HTTP_Header* iterate_message = message->headers;
-	//All the headers have been allocated. Copy to array
-	for(; iterate_link; iterate_link = iterate_link->next, ++iterate_message)
-		*iterate_message = iterate_link->header;
-
-	RETURN(0);
 	#undef RETURN
 }
 
@@ -488,7 +515,7 @@ int read_body(HTTP_Message* message, FILE* connection)
 	{
 		//Convert string to int
 		char* endptr;
-		size_t content_length = strtoul(content_length_header->value, &endptr, 10);
+		unsigned long content_length = strtoul(content_length_header->value, &endptr, 10);
 		//TODO: overflow check
 
 		//If conversion failed, bad_content_length

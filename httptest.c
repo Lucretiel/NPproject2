@@ -78,11 +78,28 @@ int main(int argc, char **argv)
 
 		printf("Clearing HTTP request\n");
 		clear_request(&message);
-/*
-		printf("Creating response\n");
+
+		printf("Creating Response\n");
 		message.response.http_version = '1';
-		message.response.status =
-*/
+		message.response.status = 200;
+		message.response.phrase = "OK";
+
+		message.body = "Hello World!\n";
+		message.body_length = strlen(message.body);
+
+		HTTP_Header headers[2];
+		char content_length_buffer[80];
+		headers[0].name = "Content-Type";
+		headers[0].value = "text/plain";
+		headers[1].name = "Content-Length";
+		headers[1].value = content_length_buffer;
+		sprintf(content_length_buffer, "%lu", message.body_length);
+
+		message.headers = headers;
+
+		printf("Writing Response\n");
+		write_response(&message, connection);
+
 		printf("Closing Socket\n");
 		fclose(connection);
 	}
