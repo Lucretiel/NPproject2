@@ -83,5 +83,10 @@ HTTP_Header* find_header(HTTP_Message*, const char*);
 //Call this ONCE PER PROGRAM. Before threads.
 void init_http();
 
+/*
+ * Call this at the end. Optional, because the memory used by init_http is
+ * fixed size per run, so it isn't strictly a leak if it isn't cleared.
+ */
+void deinit_http();
 
 #endif /* HTTP_COMMON_H_ */

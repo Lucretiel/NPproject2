@@ -23,6 +23,7 @@ char* copy_string(const char* str)
 
 int main(int argc, char **argv)
 {
+	printf("init_http\n");
 	init_http();
 	int sock = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -100,4 +101,7 @@ int main(int argc, char **argv)
 
 	printf("Closing Socket\n");
 	fclose(connection);
+
+	printf("deinit_http\n");
+	deinit_http();
 }

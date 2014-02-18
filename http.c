@@ -153,6 +153,13 @@ void init_http()
 		CR_LF);
 }
 
+void deinit_http()
+{
+	regfree(&request_regex);
+	regfree(&response_regex);
+	regfree(&header_regex);
+}
+
 //Struct linking group matches to a char*, to make finding submatches easier
 const static int max_groups = 16;
 typedef struct
