@@ -47,60 +47,57 @@ int main(int argc, char **argv)
 
 	printf("Listening on socket\n");
 
-	while(1)
-	{
-		struct sockaddr_in client;
-		unsigned len = sizeof(client);
-		printf("Awaiting Connection\n");
-		int connection_fd = accept(sock, (struct sockaddr*)&client, &len);
-		printf("Accepted connection\n");
+	struct sockaddr_in client;
+	unsigned len = sizeof(client);
+	printf("Awaiting Connection\n");
+	int connection_fd = accept(sock, (struct sockaddr*)&client, &len);
+	printf("Accepted connection\n");
 
-		FILE* connection = fdopen(connection_fd, "r+");
-		HTTP_Message message;
-		printf("Reading HTTP request line\n");
-		read_request_line(&message, connection);
-		printf("\tMethod: %d\n\tDomain: %s\n\tPath: %s\n\tVersion: %c\n",
-				message.request.method,
-				message.request.domain,
-				message.request.path,
-				message.request.http_version);
+	FILE* connection = fdopen(connection_fd, "r+");
+	HTTP_Message message;
+	printf("Reading HTTP request line\n");
+	read_request_line(&message, connection);
+	printf("\tMethod: %d\n\tDomain: %s\n\tPath: %s\n\tVersion: %c\n",
+			message.request.method,
+			message.request.domain,
+			message.request.path,
+			message.request.http_version);
 
-		printf("Reading HTTP headers\n");
-		read_headers(&message, connection);
-		printf("Got %d headers\n", message.num_headers);
-		for(int i = 0; i < message.num_headers; ++i)
-			printf("\t%s: %s\n", message.headers[i].name, message.headers[i].value);
+	printf("Reading HTTP headers\n");
+	read_headers(&message, connection);
+	printf("Got %d headers\n", message.num_headers);
+	for(int i = 0; i < message.num_headers; ++i)
+		printf("\t%s: %s\n", message.headers[i].name, message.headers[i].value);
 
-		printf("Reading HTTP body\n");
-		read_body(&message, connection);
-		if(message.body_length > 0)
-			printf("Got body\n%.*s\n", (int)message.body_length, message.body);
+	printf("Reading HTTP body\n");
+	read_body(&message, connection);
+	if(message.body_length > 0)
+		printf("Got body\n%.*s\n", (int)message.body_length, message.body);
 
-		printf("Clearing HTTP request\n");
-		clear_request(&message);
+	printf("Clearing HTTP request\n");
+	clear_request(&message);
 
-		printf("Creating Response\n");
-		message.response.http_version = '1';
-		message.response.status = 200;
-		message.response.phrase = "OK";
+	printf("Creating Response\n");
+	message.response.http_version = '1';
+	message.response.status = 200;
+	message.response.phrase = "OK";
 
-		message.body = "Hello World!\n";
-		message.body_length = strlen(message.body);
+	message.body = "Hello World!\n";
+	message.body_length = strlen(message.body);
 
-		HTTP_Header headers[2];
-		char content_length_buffer[80];
-		headers[0].name = "Content-Type";
-		headers[0].value = "text/plain";
-		headers[1].name = "Content-Length";
-		headers[1].value = content_length_buffer;
-		sprintf(content_length_buffer, "%lu", message.body_length);
+	HTTP_Header headers[2];
+	char content_length_buffer[80];
+	headers[0].name = "Content-Type";
+	headers[0].value = "text/plain";
+	headers[1].name = "Content-Length";
+	headers[1].value = content_length_buffer;
+	sprintf(content_length_buffer, "%lu", message.body_length);
 
-		message.headers = headers;
+	message.headers = headers;
 
-		printf("Writing Response\n");
-		write_response(&message, connection);
+	printf("Writing Response\n");
+	write_response(&message, connection);
 
-		printf("Closing Socket\n");
-		fclose(connection);
-	}
+	printf("Closing Socket\n");
+	fclose(connection);
 }
