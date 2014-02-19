@@ -50,10 +50,10 @@ static inline void upsize_autobuf(AutoBuffer* buffer)
 	realloc_autobuf(buffer, autobuf_allocated(buffer) * 2);
 }
 
-const int read_line_eof = 1;
-const int read_line_error = 2;
-
 const static size_t initial_size = 256;
+
+//If you need more than 1 MiB per line then you can fuck right off.
+const static size_t max_size = 1024 * 1024;
 
 int autobuf_read_line(AutoBuffer* buffer, FILE* connection)
 {
@@ -64,11 +64,6 @@ int autobuf_read_line(AutoBuffer* buffer, FILE* connection)
 
 	do
 	{
-		/*
-		 * TODO: potentially add a predicate, to ensure incoming lines are
-		 * valid. For instance, for the HTTP request, fail immediatly if an
-		 * invalid character comes in.
-		 */
 		//Check for EOF
 		if(feof(connection))
 			return read_line_eof;
@@ -76,6 +71,10 @@ int autobuf_read_line(AutoBuffer* buffer, FILE* connection)
 		//Check for other errors
 		if(ferror(connection))
 			return read_line_error;
+
+		//Check for too long
+		if(autobuf_allocated(buffer) > max_size)
+			return read_line_too_long;
 	
 		//check for end of space.
 		if(autobuf_available(buffer) <= 1)
@@ -87,8 +86,8 @@ int autobuf_read_line(AutoBuffer* buffer, FILE* connection)
 		//Advance the read pointer
 		buffer->read_point += strlen(buffer->read_point);
 		
-		//Continue looping if we don't have a CR-LF
-	} while(strcmp(buffer->read_point - 2, "\r\n"));
+		//Continue looping if we don't have a newline.
+	} while(buffer->read_point[-1] != '\n');
 
 	return 0;
 }

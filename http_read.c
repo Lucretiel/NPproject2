@@ -5,7 +5,6 @@
  *      Author: nathan
  */
 
-#include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,123 +43,15 @@ HTTP_Header* find_header(HTTP_Message* message, const char* name)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// INIT
+// GENERIC REGEX LIBRARY
 ///////////////////////////////////////////////////////////////////////////////
 
-//// REGEXES
-
-static regex_t request_regex;
-static regex_t response_regex;
-static regex_t header_regex;
-
-enum
-{
-	request_match_all=0,
-	request_match_method=1,
-	request_match_domain=2,
-	request_match_path=5,
-	request_match_version=8
-};
-
-enum
-{
-	response_match_all=0,
-	response_match_version=1,
-	response_match_status=2,
-	response_match_phrase=3
-};
-
-enum
-{
-	header_match_all=0,
-	header_match_name=2,
-	header_match_value=3
-};
-
-//Note that regexes are compiled to be case-insensitive
-
-#define LWS "[ \t]"
-#define CR_LF "\r?\n"
+//TODO: consider moving the generic stuff to a separate header and source file
 
 /*
- * Note to the reader: POSIX ERE are... not fun. They don't support non-
- * capturing groups (?:...), lazy captures (*?, +?), or character class set
- * operations (subtraction: [a-x-[aeiou]]. The lack of non-capturing groups is
- * especially problematic, as it means that we have to keep track of group
- * numbers; this is done in the comments, as "//+number" under each one.
+ * Struct linking group matches to a char*, to make finding submatches easier,
+ * since the regmatch_t string only stores offsets
  */
-#define HTTP_VERSION \
-	"HTTP/" SUBMATCH( \
-		"[0-9]+" \
-		"\\." \
-		"[0-9]+")
-//+1
-
-#define URI_PATH_CHARACTER \
-	SUBMATCH( EITHER( \
-		CLASS("]a-z0-9._~:/?#[@!$&'()*+,;=-"), /* NORMAL CHARACTER */ \
-		SUBMATCH("%[0-9a-f]{2}"))) /* PERCENT ENCODED CHARACTER */
-//+2
-
-//As above, without slash
-#define URI_DOMAIN_CHARACTER \
-	SUBMATCH( EITHER( \
-		CLASS("]a-z0-9._~:?#[@!$&'()*+,;=-"), \
-		SUBMATCH("%[0-9a-f]{2}")))
-//+2
-
-//Letters, numbers, and punctuation, except colon
-#define HEADER_NAME_CHARACTER \
-	CLASS("]a-z0-9!\"#$%&'()*+,\\./;<=>?@\[^_`{|}~-")
-
-/*
- * Regex compiler wrapper. This could be a function, but I'd like to be able to
- * use the FILLED_REGEX macro, which requires a string literal
- */
-
-#define REGEX_COMPILE(COMPONENT, CONTENT) \
-	regcomp((COMPONENT), FULL_ANCHOR(CONTENT), REG_ICASE | REG_EXTENDED)
-
-//Compile regular expressions
-void init_http()
-{
-	//REQUEST LINE REGEX
-	REGEX_COMPILE(&request_regex,
-		SUBMATCH(AT_LEAST_ONE("[A-Z]")) //METHOD: index 1
-		AT_LEAST_ONE(LWS)
-		OPTIONAL(SUBMATCH("http://" MANY(URI_DOMAIN_CHARACTER))) //DOMAIN: index 2
-		"/" SUBMATCH(MANY(URI_PATH_CHARACTER)) //PATH: index 5
-		AT_LEAST_ONE(LWS)
-		HTTP_VERSION //HTTP VERSION: index 8
-		CR_LF);
-
-	//RESPONSE LINE REGEX
-	REGEX_COMPILE(&response_regex,
-		HTTP_VERSION //HTTP VERSION: index 1
-		AT_LEAST_ONE(LWS)
-		SUBMATCH("[1-5][0-9][0-9]") //RESPONSE CODE: index 2
-		AT_LEAST_ONE(LWS)
-		SUBMATCH(MANY("[[:print:]]")) //REASON PHRASE: index 3
-		CR_LF);
-
-	//TODO: support header folding
-	//HEADER REGEX
-	REGEX_COMPILE(&header_regex,
-		OPTIONAL( SUBMATCH( //The whole header is optional.
-			SUBMATCH(AT_LEAST_ONE(HEADER_NAME_CHARACTER)) //NAME: index 2
-			":" MANY(LWS)
-			SUBMATCH(MANY("[[:print:]\t]")))) //VALUE: index 3
-		CR_LF);
-}
-
-void deinit_http()
-{
-	regfree(&request_regex);
-	regfree(&response_regex);
-	regfree(&header_regex);
-}
-
-//Struct linking group matches to a char*, to make finding submatches easier
 const static int max_groups = 16;
 typedef struct
 {
@@ -224,110 +115,136 @@ inline static bool case_compare_regex_part(const char* value,
 {
 	return strncasecmp(value,
 		match_begin(matches, which),
-		match_length(matches, which));
+		match_length(matches, which)) == 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// WRITES
+// HTTP REGEX LIBRARY
 ///////////////////////////////////////////////////////////////////////////////
 
-//TODO: io error checking
+//HTTP specific regex stuff
 
-//Write the request line
-static inline int write_request_line(HTTP_ReqLine* line, FILE* connection)
+//Note that regexes are compiled to be case-insensitive
+/*
+ * Note to the reader: POSIX ERE are... not fun. They don't support non-
+ * capturing groups (?:...), lazy captures (*?, +?), or character class set
+ * operations (subtraction: [a-z-[aeiou]]. The lack of non-capturing groups is
+ * especially problematic, as it means that we have to keep track of group
+ * numbers.
+ */
+
+#define LWS "[ \t]"
+#define CR_LF "\r?\n"
+
+#define HTTP_VERSION \
+	"HTTP/" SUBMATCH( \
+		"[1-9][0-9]*" \
+		"\\." \
+		"[0-9]+")
+
+#define URI_PATH_CHARACTER \
+	SUBMATCH( EITHER( \
+		CLASS("]a-z0-9._~:/?#[@!$&'()*+,;=-"), /* NORMAL CHARACTER */ \
+		SUBMATCH("%[0-9a-f]{2}"))) /* PERCENT ENCODED CHARACTER */
+
+//As above, without slash
+#define URI_DOMAIN_CHARACTER \
+	SUBMATCH( EITHER( \
+		CLASS("]a-z0-9._~:?#[@!$&'()*+,;=-"), \
+		SUBMATCH("%[0-9a-f]{2}")))
+
+//Letters, numbers, and punctuation, except colon
+#define HEADER_NAME_CHARACTER \
+	CLASS("]a-z0-9!\"#$%&'()*+,\\./;<=>?@\[^_`{|}~-")
+
+//Full request regex string
+#define REQUEST_REGEX_STR \
+	SUBMATCH(AT_LEAST_ONE("[A-Z]")) /* METHOD: index 1 */ \
+	AT_LEAST_ONE(LWS) \
+	OPTIONAL(SUBMATCH("http://" \
+		SUBMATCH(MANY(URI_DOMAIN_CHARACTER)))) /* DOMAIN: index 3 */ \
+	"/" SUBMATCH(MANY(URI_PATH_CHARACTER)) /* PATH: index 6 */ \
+	AT_LEAST_ONE(LWS) \
+	HTTP_VERSION /* HTTP VERSION: index 9 */ \
+	CR_LF
+
+//Full response regex string
+#define RESPONSE_REGEX_STR \
+	HTTP_VERSION /* HTTP VERSION: index 1*/ \
+	AT_LEAST_ONE(LWS) \
+	SUBMATCH("[1-5][0-9][0-9]") /* RESPONSE CODE: index 2*/ \
+	AT_LEAST_ONE(LWS) \
+	SUBMATCH(MANY("[[:print:]]")) /* REASON PHRASE: index 3 */ \
+	CR_LF
+
+
+//Full header regex string
+#define HEADER_REGEX_STR \
+	OPTIONAL( SUBMATCH( \
+		SUBMATCH(AT_LEAST_ONE(HEADER_NAME_CHARACTER)) /* NAME: index 2 */ \
+		":" MANY(LWS) \
+		SUBMATCH(MANY("[[:print:]\t]")))) /* VALUE: index 3 */ \
+	CR_LF
+
+//Indexes of the relevant subgroups
+enum
 {
-	switch(line->method)
-	{
-	case head:
-		fputs("HEAD", connection);
-		break;
-	case get:
-		fputs("GET", connection);
-		break;
-	case post:
-		fputs("POST", connection);
-		break;
-	}
+	request_match_all=0,
+	request_match_method=1,
+	request_match_domain=3,
+	request_match_path=6,
+	request_match_version=9
+} request_match_which;
 
-	fprintf(connection, " %s/%s HTTP/1.%c\r\n",
-		line->domain ? line->domain : "", //optional domain
-		line->path ? line->path : "", //optional path
-		line->http_version);
-	return 0;
+enum
+{
+	response_match_all=0,
+	response_match_version=1,
+	response_match_status=2,
+	response_match_phrase=3
+} response_match_which;
+
+enum
+{
+	header_match_all=0,
+	header_match_name=2,
+	header_match_value=3
+} header_match_which;
+
+//Globals to store the compiled regexes
+static regex_t request_regex; //matches the request line
+static regex_t response_regex; //matches the response line
+static regex_t header_regex; //matches a single header line
+
+///////////////////////////////////////////////////////////////////////////////
+// INIT
+///////////////////////////////////////////////////////////////////////////////
+
+#define REGEX_COMPILE(COMPONENT, CONTENT) \
+	regcomp((COMPONENT), FULL_ANCHOR(CONTENT), REG_ICASE | REG_EXTENDED)
+
+//Compile regular expressions
+void init_http()
+{
+	REGEX_COMPILE(&request_regex, REQUEST_REGEX_STR);
+	REGEX_COMPILE(&response_regex, RESPONSE_REGEX_STR);
+	REGEX_COMPILE(&header_regex, HEADER_REGEX_STR);
 }
 
-//Write the response line
-static inline int write_response_line(HTTP_RespLine* line, FILE* connection)
+//Uncompile regular expressions
+void deinit_http()
 {
-	fprintf(connection, "HTTP/1.%c %d %s\r\n",
-		line->http_version,
-		line->status,
-		line->phrase);
-	return 0;
+	regfree(&request_regex);
+	regfree(&response_regex);
+	regfree(&header_regex);
 }
 
-//Write a header
-static inline int write_header(HTTP_Header* header, FILE* connection)
-{
-	fprintf(connection, "%s: %s\r\n",
-		header->name,
-		header->value ? header->value : "");
-	return 0;
-}
-
-//Write all headers, empty line, and body
-static inline int write_common(HTTP_Message* message, FILE* connection)
-{
-	//Write headers until the first null header.
-	for(int i = 0; i < message->num_headers; ++i)
-		write_header(message->headers + i, connection);
-
-	//Write blank line
-	fputs("\r\n", connection);
-
-	//Write body
-	if(message->body)
-		fwrite(message->body, sizeof(char), message->body_length, connection);
-
-	//flush
-	fflush(connection);
-
-	return 0;
-}
-
-//Write a whole request
-int write_request(HTTP_Message* request, FILE* connection)
-{
-	if(write_request_line(&request->request, connection))
-		return -1;
-	if(write_common(request, connection) == -1)
-		return -1;
-	return 0;
-}
-
-int write_response(HTTP_Message* response, FILE* connection)
-{
-	if(write_response_line(&response->response, connection))
-		return -1;
-	if(write_common(response, connection))
-		return -1;
-	return 0;
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 // READS
 ///////////////////////////////////////////////////////////////////////////////
 
-const int connection_error = 1;
-
-const int malformed_line = 2;
-const int malformed_header = 3;
-
-const int bad_method = 4;
-const int bad_version = 5;
-
-const int no_content_length = 6;
-const int bad_content_length = 7;
+const static int max_headers = 1024;
 
 //True if the method in the request matches the method given
 static inline bool is_method(const char* method, const RegexMatches* matches)
@@ -336,18 +253,24 @@ static inline bool is_method(const char* method, const RegexMatches* matches)
 }
 
 //TODO: find a way to share AutoBuffers between read calls, to reduce allocations
-//TODO: Holy shit error checking
 int read_request_line(HTTP_Message* message, FILE* connection)
 {
-	//Wipe the message. The client must clear it before calling read.
+	//Wipe the message. The client must free everything before calling read.
 	clean_message(message);
 
 	AutoBuffer buffer = init_autobuf;
 	#define RETURN(CODE) { free(buffer.storage_begin); return (CODE); }
 
-	//Read up to a CR LF, autoallocating as nessesary
-	if(autobuf_read_line(&buffer, connection))
-		RETURN(connection_error);
+	//Read a line
+	switch(autobuf_read_line(&buffer, connection))
+	{
+	case 0:
+		break;
+	case read_line_too_long:
+		RETURN(line_too_long)
+	default:
+		RETURN(connection_error)
+	}
 
 	//TODO: check for regex out-of-memory error
 	//Match the regex
@@ -363,15 +286,13 @@ int read_request_line(HTTP_Message* message, FILE* connection)
 	else if(is_method("POST", &matches))
 		message->request.method = post;
 	else
-		RETURN(bad_method);
+		RETURN(bad_method)
 
 	//Verify and get the HTTP version
 	//Must be 1.0 or 1.1
 	if(!(compare_regex_part("1.0", &matches, request_match_version) ||
 			compare_regex_part("1.1", &matches, request_match_version)))
-	{
-		RETURN(bad_version);
-	}
+		RETURN(bad_version)
 	else
 	{
 		const char* http_version = match_begin(&matches, request_match_version);
@@ -396,15 +317,20 @@ int read_response_line(HTTP_Message* message, FILE* connection)
 	#define RETURN(CODE) { free(buffer.storage_begin); return (CODE); }
 
 	//Read up to a CR_LF, autoallocating as nessesary
-	if(autobuf_read_line(&buffer, connection))
-		RETURN(connection_error);
+	switch(autobuf_read_line(&buffer, connection))
+	{
+	case 0:
+		break;
+	case read_line_too_long:
+		RETURN(line_too_long)
+	default:
+		RETURN(connection_error)
+	}
 
 	//Match the response regex
 	RegexMatches matches;
 	if(regex_match(&response_regex, &matches, buffer.storage_begin) == REG_NOMATCH)
 		RETURN(malformed_line);
-
-	const char* match_ptr;
 
 	//TODO: reduce code repitition between here and request
 	//Verify and get the HTTP version
@@ -424,8 +350,8 @@ int read_response_line(HTTP_Message* message, FILE* connection)
 	 * Get the status code. We know from the regex that it's a valid 3 digit
 	 * number, and also that it ends in a space. strtol is safe to use.
 	 */
-	match_ptr = match_begin(&matches, response_match_status);
-	message->response.status = strtol(match_ptr, 0, 10);
+	message->response.status = strtol(
+			match_begin(&matches, response_match_status), 0, 10);
 
 	//Get the status phrase
 	//TODO: Pick from a table instead?
@@ -444,7 +370,10 @@ int read_response_line(HTTP_Message* message, FILE* connection)
 int get_headers(int* num_headers, HTTP_Header** headers,
 		AutoBuffer* buffer, FILE* connection, int depth)
 {
-	//TODO: size/recursion limit
+	//Check for max headers
+	if(depth > max_headers)
+		return too_many_headers;
+
 	//Read next line, return if error
 	if(autobuf_read_line(buffer, connection))
 		return connection_error;
@@ -514,6 +443,8 @@ int read_headers(HTTP_Message* message, FILE* connection)
 
 int read_body(HTTP_Message* message, FILE* connection)
 {
+	//TODO: chunked encoding
+	//TODO: keepalive etc
 	//Lookup Content-Length
 	const HTTP_Header* content_length_header = find_header(message, "Content-Length");
 
@@ -556,37 +487,6 @@ int read_body(HTTP_Message* message, FILE* connection)
 	return 0;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// CLEARS
-///////////////////////////////////////////////////////////////////////////////
 
-#define CLEAR(PTR) free(PTR); PTR = 0
 
-static inline void clear_header(HTTP_Header* header)
-{
-	CLEAR(header->name);
-	CLEAR(header->value);
-}
 
-static inline void clear_common(HTTP_Message* message)
-{
-	CLEAR(message->body);
-	for(int i = 0; i < message->num_headers; ++i)
-		clear_header(message->headers + i);
-	CLEAR(message->headers);
-	message->num_headers = 0;
-	message->body_length = 0;
-}
-
-void clear_request(HTTP_Message* message)
-{
-	CLEAR(message->request.domain);
-	CLEAR(message->request.path);
-	clear_common(message);
-}
-
-void clear_response(HTTP_Message* message)
-{
-	CLEAR(message->response.phrase);
-	clear_common(message);
-}
