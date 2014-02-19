@@ -11,6 +11,8 @@
 
 #include "autobuf.h"
 
+#include "config.h"
+
 //Total allocated size
 static inline size_t autobuf_allocated(const AutoBuffer* buffer)
 {
@@ -50,31 +52,26 @@ static inline void upsize_autobuf(AutoBuffer* buffer)
 	realloc_autobuf(buffer, autobuf_allocated(buffer) * 2);
 }
 
-const static size_t initial_size = 256;
-
-//If you need more than 1 MiB per line then you can fuck right off.
-const static size_t max_size = 1024 * 1024;
-
-int autobuf_read_line(AutoBuffer* buffer, FILE* connection)
+int autobuf_read_line(AutoBuffer* buffer, FILE* connection, const size_t max)
 {
 	reset_autobuf(buffer);
 
 	if(buffer->storage_begin == 0 || buffer->storage_begin == buffer->storage_end)
-		realloc_autobuf(buffer, initial_size);
+		realloc_autobuf(buffer, autobuf_initial_size);
 
 	do
 	{
 		//Check for EOF
 		if(feof(connection))
-			return read_line_eof;
+			return autobuf_eof;
 
 		//Check for other errors
 		if(ferror(connection))
-			return read_line_error;
+			return autobuf_error;
 
 		//Check for too long
-		if(autobuf_allocated(buffer) > max_size)
-			return read_line_too_long;
+		if(autobuf_allocated(buffer) > max)
+			return autobuf_too_long;
 	
 		//check for end of space.
 		if(autobuf_available(buffer) <= 1)

@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include "http.h"
 
+#include "config.h"
+
 //TODO: io error checking
 
 static inline int write_request_line(HTTP_ReqLine* line, FILE* connection)
@@ -69,7 +71,8 @@ static inline int write_common(HTTP_Message* message, FILE* connection)
 		fwrite(message->body, sizeof(char), message->body_length, connection);
 
 	//flush
-	fflush(connection);
+	if(flush_http_messages)
+		fflush(connection);
 
 	return 0;
 }

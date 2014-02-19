@@ -14,6 +14,8 @@
 #include "ReadableRegex/readable_regex.h"
 #include "autobuf.h"
 
+#include "config.h"
+
 ///////////////////////////////////////////////////////////////////////////////
 // UTILITY
 ///////////////////////////////////////////////////////////////////////////////
@@ -244,8 +246,6 @@ void deinit_http()
 // READS
 ///////////////////////////////////////////////////////////////////////////////
 
-const static int max_headers = 1024;
-
 //True if the method in the request matches the method given
 static inline bool is_method(const char* method, const RegexMatches* matches)
 {
@@ -262,11 +262,11 @@ int read_request_line(HTTP_Message* message, FILE* connection)
 	#define RETURN(CODE) { free(buffer.storage_begin); return (CODE); }
 
 	//Read a line
-	switch(autobuf_read_line(&buffer, connection))
+	switch(autobuf_read_line(&buffer, connection, max_message_line_size))
 	{
 	case 0:
 		break;
-	case read_line_too_long:
+	case autobuf_too_long:
 		RETURN(line_too_long)
 	default:
 		RETURN(connection_error)
@@ -317,11 +317,11 @@ int read_response_line(HTTP_Message* message, FILE* connection)
 	#define RETURN(CODE) { free(buffer.storage_begin); return (CODE); }
 
 	//Read up to a CR_LF, autoallocating as nessesary
-	switch(autobuf_read_line(&buffer, connection))
+	switch(autobuf_read_line(&buffer, connection, max_message_line_size))
 	{
 	case 0:
 		break;
-	case read_line_too_long:
+	case autobuf_too_long:
 		RETURN(line_too_long)
 	default:
 		RETURN(connection_error)
@@ -375,8 +375,15 @@ int get_headers(int* num_headers, HTTP_Header** headers,
 		return too_many_headers;
 
 	//Read next line, return if error
-	if(autobuf_read_line(buffer, connection))
+	switch(autobuf_read_line(buffer, connection, max_header_size))
+	{
+	case 0:
+		break;
+	case autobuf_too_long:
+		return header_too_long;
+	default:
 		return connection_error;
+	}
 
 	//Parse line, return if error
 	RegexMatches matches;
