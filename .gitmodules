@@ -1,3 +1,6 @@
 [submodule "ReadableRegex"]
 	path = ReadableRegex
 	url = https://github.com/Lucretiel/ReadableRegex.git
+[submodule "EasyString"]
+	path = EasyString
+	url = https://github.com/Lucretiel/EasyString.git
