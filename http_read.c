@@ -73,6 +73,13 @@ inline static int regex_match(const regex_t* regex, RegexMatches* matches,
 	return return_code;
 }
 
+static inline StringRef get_regex_part(const RegexMatches* matches, int part)
+{
+	return matches->matches[part];
+}
+
+#define REGEX_PART(PART) get_regex_part(&matches, (PART))
+
 ///////////////////////////////////////////////////////////////////////////////
 // HTTP REGEX LIBRARY
 ///////////////////////////////////////////////////////////////////////////////
@@ -206,13 +213,6 @@ void deinit_http()
 // READS
 ///////////////////////////////////////////////////////////////////////////////
 
-static inline StringRef get_regex_part(const RegexMatches* matches, int part)
-{
-	return matches->matches[part];
-}
-
-#define REGEX_PART(PART) get_regex_part(&matches, (PART))
-
 //TODO: find a way to share AutoBuffers between read calls, to reduce allocations
 int read_request_line(HTTP_Message* message, FILE* connection)
 {
@@ -269,10 +269,11 @@ int read_request_line(HTTP_Message* message, FILE* connection)
 
 int read_response_line(HTTP_Message* message, FILE* connection)
 {
+	//Read a line
 	String line = es_readline(connection, '\n', MAX_MSG_LINE_SIZE);
 	#define RETURN(CODE) { es_free(&line); return (CODE); }
 
-	//Read up to a CR_LF, autoallocating as nessesary
+	//Check for read errors
 	if(ferror(connection) || feof(connection)) RETURN(connection_error)
 	if(es_cstr(&line)[line.size - 1] != '\n') RETURN(too_long);
 
@@ -305,6 +306,7 @@ int read_response_line(HTTP_Message* message, FILE* connection)
 
 int read_headers(HTTP_Message* message, FILE* connection)
 {
+
 }
 
 int read_body(HTTP_Message* message, FILE* connection)
