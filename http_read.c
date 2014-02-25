@@ -115,13 +115,6 @@ static inline StringRef get_regex_part(const RegexMatches* matches, int part)
 		CLASS("]a-z0-9._~:?#[@!$&'()*+,;=-"), \
 		SUBMATCH("%[0-9a-f]{2}")))
 
-//All characters except colon and whitespace
-#define HEADER_NAME_CHARACTER "[^:[:space:]]"
-
-//TODO: update this to support \r inline
-#define HEADER_VALUE_CHARACTER "[^\r\n]"
-#define HEADER_VALUE AT_LEAST_ONE(HEADER_VALUE_CHARACTER)
-
 //Full request regex string
 #define REQUEST_REGEX_STR \
 	FULL_ANCHOR( \
@@ -143,13 +136,24 @@ static inline StringRef get_regex_part(const RegexMatches* matches, int part)
 	SUBMATCH(MANY("[[:print:]]")) /* REASON PHRASE: index 3 */ \
 	CR_LF )
 
+
+//All printed characters except colon
+#define HEADER_NAME_CHARACTER CLASS("]a-z0-9[!\"#$%&'()*+,./:;<=>?@[\\\\^_`{|}~]\-")
+
+//TODO: update this to support \r inline
+#define HEADER_VALUE_CHARACTER CLASS("\t[:print:]")
+
 //Full header regex string
 #define HEADER_REGEX_STR \
-	SUBMATCH(MANY(HEADER_NAME_CHARACTER)) /* HEADER NAME: 1 */ \
+	SUBMATCH( /* HEADER NAME: 1 */ \
+		AT_LEAST_ONE(HEADER_NAME_CHARACTER)) \
 	":" MANY(LWS) \
-	SUBMATCH( /* HEADER VALUE: 2 */ \
-		HEADER_VALUE \
-		MANY(SUBMATCH(CR_LF AT_LEAST_ONE(LWS) HEADER_VALUE))) \
+	SUBMATCH(  /* HEADER VALUE: 2 */ \
+		AT_LEAST_ONE(HEADER_VALUE_CHARACTER) \
+		MANY(SUBMATCH( \
+			CR_LF \
+			AT_LEAST_ONE(LWS) \
+			AT_LEAST_ONE(HEADER_VALUE_CHARACTER)))) \
 		CR_LF
 
 //Indexes of the relevant subgroups
@@ -306,7 +310,7 @@ int read_response_line(HTTP_Message* message, FILE* connection)
 
 int read_headers(HTTP_Message* message, FILE* connection)
 {
-
+	String headers = es_
 }
 
 int read_body(HTTP_Message* message, FILE* connection)
