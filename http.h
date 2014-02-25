@@ -7,10 +7,10 @@
  *  Utilities for manipulating HTTP data. Use fdopen to get a FILE* from an fd.
  */
 
-#ifndef HTTP_COMMON_H_
-#define HTTP_COMMON_H_
+#pragma once
 
 #include <stdio.h> //For FILE*
+#include "EasyString/easy_string.h"
 
 /*
  * HTTP_ReqLine contains the data for a single request line. Members:
@@ -22,9 +22,9 @@
  */
 typedef struct
 {
+	String domain;
+	String path;
 	enum { head, get, post } method;
-	char* domain;
-	char* path;
 	char http_version; //0->1.0, 1->1.1
 } HTTP_ReqLine;
 
@@ -36,8 +36,8 @@ typedef struct
  */
 typedef struct
 {
+	String phrase;
 	int status;
-	char* phrase;
 	char http_version; //0->1.0, 1->1.1
 } HTTP_RespLine;
 
@@ -47,8 +47,8 @@ typedef struct
  */
 typedef struct
 {
-	char* name;
-	char* value;
+	String name;
+	String value;
 } HTTP_Header;
 
 /*
@@ -80,10 +80,10 @@ typedef struct
 	HTTP_Header* headers;
 	int num_headers;
 
-	size_t body_length;
-	char* body;
+	String body;
 } HTTP_Message;
 
+static const HTTP_Message empty_message;
 
 /*
  * Must be called in order. Request/response -> headers -> body -> clear.
@@ -94,8 +94,7 @@ enum
 {
 	connection_error = 1, //EOF or other connection issue
 
-	malformed_line, //regex didn't match request/response line
-	malformed_header, //regex didn't match header line
+	malformed_line, //regex didn't match
 
 	bad_method, //method isn't GET, HEAD, or POST
 	bad_version, //HTTP version isn't 1.0 or 1.1
@@ -103,8 +102,7 @@ enum
 	no_content_length, //content length header isn't present
 	bad_content_length, //content length header is invalid
 
-	line_too_long, //the request/response line is too long
-	header_too_long, //some header is too long
+	too_long, //Line was too long
 	too_many_headers //There are too many headers
 };
 
@@ -120,7 +118,8 @@ int write_response(HTTP_Message*, FILE*);
 void clear_request(HTTP_Message*);
 void clear_response(HTTP_Message*);
 
-HTTP_Header* find_header(HTTP_Message*, const char*);
+//Find a header. The header name should be in lowercase.
+HTTP_Header* find_header(HTTP_Message*, StringRef);
 
 //Call this ONCE PER PROGRAM. Before threads.
 void init_http();
@@ -130,7 +129,3 @@ void init_http();
  * fixed size per run, so it isn't strictly a leak if it isn't cleared.
  */
 void deinit_http();
-
-
-
-#endif /* HTTP_COMMON_H_ */

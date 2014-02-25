@@ -27,11 +27,11 @@ static inline int write_request_line(HTTP_ReqLine* line, FILE* connection)
 		break;
 	}
 
-	if(line->domain)
-		fprintf(connection, "http://%s", line->domain);
+	if(line->domain.size)
+		fprintf(connection, "http://%.*s", ES_STRINGSIZE(&line->domain));
 
-	fprintf(connection, "/%s HTTP/1.%c\r\n",
-		line->path ? line->path : "", //optional path
+	fprintf(connection, "/%.*s HTTP/1.%c\r\n",
+		ES_STRINGSIZE(&line->domain),
 		line->http_version);
 	return 0;
 }
@@ -39,19 +39,19 @@ static inline int write_request_line(HTTP_ReqLine* line, FILE* connection)
 //Write the response line
 static inline int write_response_line(HTTP_RespLine* line, FILE* connection)
 {
-	fprintf(connection, "HTTP/1.%c %d %s\r\n",
+	fprintf(connection, "HTTP/1.%c %d %.*s\r\n",
 		line->http_version,
 		line->status,
-		line->phrase);
+		ES_STRINGSIZE(&line->phrase));
 	return 0;
 }
 
 //Write a header
 static inline int write_header(HTTP_Header* header, FILE* connection)
 {
-	fprintf(connection, "%s: %s\r\n",
-		header->name,
-		header->value ? header->value : "");
+	fprintf(connection, "%.*s: %.*s\r\n",
+		ES_STRINGSIZE(&header->name),
+		ES_STRINGSIZE(&header->value));
 	return 0;
 }
 
@@ -67,11 +67,10 @@ static inline int write_common(HTTP_Message* message, FILE* connection)
 	fputs("\r\n", connection);
 
 	//Write body
-	if(message->body)
-		fwrite(message->body, sizeof(char), message->body_length, connection);
+	fwrite(ES_STRINGSIZE(&message->body), 1, connection);
 
 	//flush
-	if(flush_http_messages)
+	if(FLUSH_HTTP_MSGS)
 		fflush(connection);
 
 	return 0;
