@@ -20,10 +20,22 @@
 //Find a header
 HTTP_Header* find_header(HTTP_Message* message, StringRef header_name)
 {
+	String name_lower = es_tolower(header_name);
+	StringRef name_lower_ref = es_ref(&name_lower);
+
 	HTTP_Header* const back = message->headers + message->num_headers;
 	for(HTTP_Header* header = message->headers; header < back; ++header)
-		if(es_compare(header_name, es_ref(&header->name)) == 0)
+	{
+		String lower = es_tolower(es_ref(&header->name));
+		int cmp = es_compare(name_lower_ref, es_ref(&lower));
+		es_free(&lower);
+		if(cmp == 0)
+		{
+			es_free(&name_lower);
 			return header;
+		}
+	}
+	es_free(&name_lower);
 	return 0;
 }
 
@@ -199,23 +211,17 @@ static inline StringRef get_regex_part(const RegexMatches* matches, int part)
 	return matches->matches[part];
 }
 
-//True if the method in the request matches the method given. Pass in lowercase
-static inline int is_method(const char* method, const RegexMatches* matches)
-{
-	String str = es_tolower(get_regex_part(matches, request_match_method));
-	int result = es_compare(es_ref(&str), es_temp(method));
-	es_free(&str);
-	return result == 0;
-}
+#define REGEX_PART(PART) get_regex_part(&matches, (PART))
 
 //TODO: find a way to share AutoBuffers between read calls, to reduce allocations
 int read_request_line(HTTP_Message* message, FILE* connection)
 {
 	//read a line
-	String line = es_readanyline(connection, '\n');
+	String line = es_readline(connection, '\n', MAX_MSG_LINE_SIZE);
 	#define RETURN(CODE) { es_free(&line); return (CODE); }
 
-	if(ferror(connection) || feof(connection)) RETURN(connection_error)
+	if(ferror(connection) || feof(connection)) RETURN(connection_error);
+	if(es_cstr(&line)[line.size - 1] != '\n') RETURN(too_long);
 
 	//TODO: check for regex out-of-memory error
 	//Match the regex
@@ -224,29 +230,38 @@ int read_request_line(HTTP_Message* message, FILE* connection)
 			request_num_matches) == REG_NOMATCH)
 		RETURN(malformed_line);
 
-	//Verify and get the method
-	if(is_method("HEAD", &matches))
-		message->request.method = head;
-	else if(is_method("GET", &matches))
-		message->request.method = get;
-	else if(is_method("POST", &matches))
-		message->request.method = post;
-	else
-		RETURN(bad_method);
+	//Get the method
+	{
+		String method = es_tolower(REGEX_PART(request_match_method));
+		StringRef methodr = es_ref(&method);
+		if(es_compare(es_temp("head"), methodr) == 0)
+			message->request.method = head;
+		else if(es_compare(es_temp("get"), methodr) == 0)
+			message->request.method = get;
+		else if(es_compare(es_temp("post"), methodr) == 0)
+			message->request.method = post;
+		else
+		{
+			es_free(&method);
+			RETURN(bad_method);
+		}
+		es_free(&method);
+	}
 
-	//Verify and get the HTTP version
-	//Must be 1.0 or 1.1
-	StringRef version = get_regex_part(&matches, request_match_version);
-	if(es_compare(es_temp("1.1"), version) && es_compare(es_temp("1.0"), version))
-		RETURN(bad_version)
-	else
-		message->request.http_version = version.begin[2];
+	//Get the HTTP Version
+	{
+		StringRef version = REGEX_PART(request_match_version);
+		if(es_compare(es_temp("1.1"), version) && es_compare(es_temp("1.0"), version))
+			RETURN(bad_version)
+		else
+			message->request.http_version = version.begin[2];
+	}
 
 	//Get the domain
-	message->request.domain = es_copy(get_regex_part(&matches, request_match_domain));
+	message->request.domain = es_copy(REGEX_PART(request_match_domain));
 
 	//Get the path
-	message->request.path = es_copy(get_regex_part(&matches, request_match_path));
+	message->request.path = es_copy(REGEX_PART(request_match_path));
 
 	RETURN(0);
 	#undef RETURN
@@ -254,91 +269,46 @@ int read_request_line(HTTP_Message* message, FILE* connection)
 
 int read_response_line(HTTP_Message* message, FILE* connection)
 {
-	clean_message(message);
-
-	String line = string_read_line(connection, '\n');
-	#define RETURN(CODE) { string_free(&line); return (CODE); }
+	String line = es_readline(connection, '\n', MAX_MSG_LINE_SIZE);
+	#define RETURN(CODE) { es_free(&line); return (CODE); }
 
 	//Read up to a CR_LF, autoallocating as nessesary
 	if(ferror(connection) || feof(connection)) RETURN(connection_error)
+	if(es_cstr(&line)[line.size - 1] != '\n') RETURN(too_long);
 
 	//Match the response regex
-	RegexMatches matches = {0};
-	if(regex_match(&request_regex, &matches, string_temp(&line),
+	RegexMatches matches;
+	if(regex_match(&request_regex, &matches, es_ref(&line),
 			response_num_matches) == REG_NOMATCH)
 		RETURN(malformed_line)
 
 	//TODO: reduce code repitition between here and request
-	//Verify and get the HTTP version
-	//Must be 1.0 or 1.1
-	if(string_compare_cstr(
-			"1.0", matches->matches[request_match_version]) == 0
-		|| string_compare_cstr(
-			"1.1", matches->matches[request_match_version]) == 0)
+	//Get the HTTP Version
 	{
-		message->request.http_version =
-			string_cstr(&matches->matches[request_match_version])[2];
+		StringRef version = REGEX_PART(response_match_version);
+		if(es_compare(es_temp("1.1"), version) && es_compare(es_temp("1.0"), version))
+			RETURN(bad_version)
+		else
+			message->request.http_version = version.begin[2];
 	}
-	else
-		RETURN(bad_version)
 
 	//Get status code
-	message->response.status = strtol(
-			match_begin(&matches, response_match_status), 0, 10);
+	StringRef status = REGEX_PART(response_match_status);
+	message->response.status = strtol(status.begin, 0, 10);
 
 	//Get the status phrase
-	//TODO: Pick from a table instead?
-	message->response.phrase = string_copy(
-		&matches->matches[response_match_phrase]);
+	message->response.phrase = es_copy(REGEX_PART(response_match_phrase));
 
 	RETURN(0);
 	#undef RETURN
 }
 
+int read_headers(HTTP_Message* message, FILE* connection)
+{
+}
+
 int read_body(HTTP_Message* message, FILE* connection)
 {
-	//TODO: chunked encoding
-	//TODO: keepalive etc
-	//Lookup Content-Length
-	const HTTP_Header* content_length_header = find_header(message, "Content-Length");
-
-	//If there is a content-length header
-	if(content_length_header)
-	{
-		//Convert string to int
-		char* endptr;
-		unsigned long content_length = strtoul(content_length_header->value, &endptr, 10);
-		//TODO: overflow check
-
-		//If conversion failed, bad_content_length
-		if(endptr == content_length_header->value)
-			return bad_content_length;
-
-		//If content length is not 0
-		if(content_length)
-		{
-			//Allocate and read in the body
-			char* body = calloc(sizeof(char), content_length);
-			size_t amount_read = fread(body, sizeof(char), content_length,
-					connection);
-
-			//If the wrong number of bytes were read, assume a connection error
-			if(amount_read != content_length)
-			{
-				free(body);
-				return connection_error;
-			}
-
-			//Attach body to message and return normally
-			message->body_length = content_length;
-			message->body = body;
-		}
-	}
-	//If there is no content length header, no_content_length
-	else
-		return no_content_length;
-
-	return 0;
 }
 
 

@@ -106,10 +106,14 @@ enum
 	too_many_headers //There are too many headers
 };
 
-
+//Read the first HTTP Line
 int read_request_line(HTTP_Message*, FILE*);
 int read_response_line(HTTP_Message*, FILE*);
+
+//Read all headers
 int read_headers(HTTP_Message*, FILE*);
+
+//Read the body
 int read_body(HTTP_Message*, FILE*);
 
 int write_request(HTTP_Message*, FILE*);
@@ -118,7 +122,7 @@ int write_response(HTTP_Message*, FILE*);
 void clear_request(HTTP_Message*);
 void clear_response(HTTP_Message*);
 
-//Find a header. The header name should be in lowercase.
+//Find a header.
 HTTP_Header* find_header(HTTP_Message*, StringRef);
 
 //Call this ONCE PER PROGRAM. Before threads.

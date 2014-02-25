@@ -28,10 +28,10 @@ static inline int write_request_line(HTTP_ReqLine* line, FILE* connection)
 	}
 
 	if(line->domain.size)
-		fprintf(connection, "http://%.*s", ES_STRINGSIZE(&line->domain));
+		fprintf(connection, "http://%.*s", (int)ES_SIZESTRING(&line->domain));
 
 	fprintf(connection, "/%.*s HTTP/1.%c\r\n",
-		ES_STRINGSIZE(&line->domain),
+		(int)ES_SIZESTRING(&line->path),
 		line->http_version);
 	return 0;
 }
@@ -42,7 +42,7 @@ static inline int write_response_line(HTTP_RespLine* line, FILE* connection)
 	fprintf(connection, "HTTP/1.%c %d %.*s\r\n",
 		line->http_version,
 		line->status,
-		ES_STRINGSIZE(&line->phrase));
+		(int)ES_SIZESTRING(&line->phrase));
 	return 0;
 }
 
@@ -50,8 +50,8 @@ static inline int write_response_line(HTTP_RespLine* line, FILE* connection)
 static inline int write_header(HTTP_Header* header, FILE* connection)
 {
 	fprintf(connection, "%.*s: %.*s\r\n",
-		ES_STRINGSIZE(&header->name),
-		ES_STRINGSIZE(&header->value));
+		(int)ES_SIZESTRING(&header->name),
+		(int)ES_SIZESTRING(&header->value));
 	return 0;
 }
 
