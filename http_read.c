@@ -164,8 +164,8 @@ enum
 	request_match_all,
 	request_match_method=1,
 	request_match_domain=3,
-	request_match_path=6,
-	request_match_version=9,
+	request_match_path=5,
+	request_match_version=7,
 	request_num_matches
 } request_match_which;
 
