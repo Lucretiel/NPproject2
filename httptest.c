@@ -17,11 +17,6 @@
 
 #include "http.h"
 
-char* copy_string(const char* str)
-{
-	return strcpy(malloc(strlen(str) + 1), str);
-}
-
 int main(int argc, char **argv)
 {
 	printf("init_http\n");
@@ -62,22 +57,24 @@ int main(int argc, char **argv)
 		HTTP_Message message;
 		printf("Reading HTTP request line\n");
 		read_request_line(&message, connection);
-		printf("\tMethod: %d\n\tDomain: %s\n\tPath: %s\n\tVersion: %c\n",
+		printf("\tMethod: %d\n\tDomain: %.*s\n\tPath: %.*s\n\tVersion: %c\n",
 				message.request.method,
-				message.request.domain ? message.request.domain : "",
-				message.request.path ? message.request.path : "",
+				(int)ES_SIZESTRCNST(&message.request.domain),
+				(int)ES_SIZESTRCNST(&message.request.path),
 				message.request.http_version);
 
 		printf("Reading HTTP headers\n");
 		read_headers(&message, connection);
 		printf("Got %d headers\n", message.num_headers);
 		for(int i = 0; i < message.num_headers; ++i)
-			printf("\t%s: %s\n", message.headers[i].name, message.headers[i].value);
+			printf("\t%.*s: %.*s\n",
+				(int)ES_SIZESTRCNST(&message.headers[i].name),
+				(int)ES_SIZESTRCNST(&message.headers[i].value));
 
 		printf("Reading HTTP body\n");
 		read_body(&message, connection);
-		if(message.body_length > 0)
-			printf("Got body\n%.*s\n", (int)message.body_length, message.body);
+		if(message.body.size > 0)
+			printf("Got body\n%.*s\n", (int)ES_SIZESTRCNST(&message.body));
 
 		printf("Forwarding\n");
 
@@ -90,7 +87,11 @@ int main(int argc, char **argv)
 		}
 
 		struct addrinfo* result;
-		getaddrinfo(message.request.domain, "http", 0, &result);
+		//Need to get null terminated string :(
+		char* domain = calloc(message.request.domain.size, 1);
+		memcpy(domain, ES_STRCNSTSIZE(&message.request.domain));
+		getaddrinfo(domain, "http", 0, &result);
+		free(domain); domain = 0;
 		if(connect(client_sock, result->ai_addr, sizeof(*result->ai_addr)) < 0)
 		{
 			perror("FUCK\n");
@@ -99,7 +100,7 @@ int main(int argc, char **argv)
 
 		FILE* server_connection = fdopen(client_sock, "r+");
 
-		free(message.request.domain); message.request.domain = 0;
+		es_clear(&message.request.domain);
 
 		printf("Writing request\n");
 		write_request(&message, server_connection);
