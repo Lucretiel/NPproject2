@@ -78,7 +78,7 @@ typedef struct
 	};
 
 	HTTP_Header* headers;
-	int num_headers;
+	unsigned num_headers;
 
 	String body;
 } HTTP_Message;
@@ -99,10 +99,9 @@ enum
 	bad_method, //method isn't GET, HEAD, or POST
 	bad_version, //HTTP version isn't 1.0 or 1.1
 
-	no_content_length, //content length header isn't present
 	bad_content_length, //content length header is invalid
 
-	too_long, //Line was too long
+	too_long, //Something was too long
 	too_many_headers //There are too many headers
 };
 

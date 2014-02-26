@@ -9,9 +9,11 @@
 
 #pragma once
 
-const static int MAX_MSG_LINE_SIZE = 1024 * 1024;
-const static int MAX_HEADER_SIZE = 1024 * 1024;
-const static int MAX_BODY_SIZE = 1024 * 1024 * 1024;
+const static unsigned long MAX_MSG_LINE_SIZE = 1024 * 1024;
+const static unsigned long MAX_HEADER_SIZE = 1024 * 1024;
+const static unsigned long MAX_BODY_SIZE = 1024 * 1024 * 1024;
+const static unsigned long MAX_CHUNK_HEADER_SIZE = 1024;
+const static unsigned long MAX_CHUNK_SIZE = 1024 * 1024;
 
 const static int MAX_NUM_HEADERS = 1024;
 

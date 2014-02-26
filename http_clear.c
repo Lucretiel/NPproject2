@@ -20,6 +20,7 @@ static inline void clear_common(HTTP_Message* message)
 		clear_header(message->headers + i);
 	free(message->headers);
 	message->num_headers = 0;
+	message->headers = 0;
 	es_clear(&message->body);
 }
 
