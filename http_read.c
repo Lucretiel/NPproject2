@@ -18,21 +18,21 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 //Find a header
-HTTP_Header* find_header(HTTP_Message* message, StringRef header_name)
+const HTTP_Header* find_header(const HTTP_Message* message, StringRef header_name)
 {
 	String name_lower = es_tolower(header_name);
 	StringRef name_lower_ref = es_ref(&name_lower);
+	const HTTP_Header* headers = message->headers;
 
-	HTTP_Header* const back = message->headers + message->num_headers;
-	for(HTTP_Header* header = message->headers; header < back; ++header)
+	for(int i = 0; i < message->num_headers; ++i)
 	{
-		String lower = es_tolower(es_ref(&header->name));
+		String lower = es_tolower(es_ref(&headers[i].name));
 		int cmp = es_compare(name_lower_ref, es_ref(&lower));
 		es_free(&lower);
 		if(cmp == 0)
 		{
 			es_free(&name_lower);
-			return header;
+			return headers + i;
 		}
 	}
 	es_free(&name_lower);
@@ -60,7 +60,8 @@ inline static int regex_match(const regex_t* regex, RegexMatches matches,
 			if(local[i].rm_so == -1)
 				matches[i] = es_null_ref;
 			else
-				matches[i] = es_slice(str, local[i].rm_so, local[i].rm_eo);
+				matches[i] = es_slice(str, local[i].rm_so,
+					local[i].rm_eo - local[i].rm_so);
 	}
 	return return_code;
 }
@@ -125,10 +126,12 @@ inline static int regex_match(const regex_t* regex, RegexMatches matches,
 
 
 //All printed characters except colon
-#define HEADER_NAME_CHARACTER CLASS("]a-z0-9[!\"#$%&'()*+,./:;<=>?@[\\^_`{|}~]-")
+//#define HEADER_NAME_CHARACTER CLASS("]a-z0-9[!\"#$%&'()*+,./:;<=>?@[\\^_`{|}~]-")
+#define HEADER_NAME_CHARACTER CLASS("a-z0-9-")
 
 //TODO: update this to support \r inline
-#define HEADER_VALUE_CHARACTER CLASS("\t[:print:]")
+//#define HEADER_VALUE_CHARACTER CLASS("\t[:print:]")
+#define HEADER_VALUE_CHARACTER CLASS("[:print:]")
 
 /*
  * Full header regex. It matches strings of the form:
@@ -140,17 +143,23 @@ inline static int regex_match(const regex_t* regex, RegexMatches matches,
  * Header name must have no indentation or whitespace, more header body must
  * have some
  */
+
+//#define HEADER_REGEX_STR FRONT_ANCHOR( \
+//	SUBMATCH( /* HEADER NAME: 1 */ \
+//		AT_LEAST_ONE(HEADER_NAME_CHARACTER)) \
+//	":" MANY(LWS) \
+//	SUBMATCH(  /* HEADER VALUE: 2 */ \
+//		AT_LEAST_ONE(HEADER_VALUE_CHARACTER) \
+//		MANY(SUBMATCH( \
+//			CR_LF \
+//			AT_LEAST_ONE(LWS) \
+//			AT_LEAST_ONE(HEADER_VALUE_CHARACTER))))) \
+//		CR_LF
+
 #define HEADER_REGEX_STR FRONT_ANCHOR( \
-	SUBMATCH( /* HEADER NAME: 1 */ \
-		AT_LEAST_ONE(HEADER_NAME_CHARACTER)) \
+	SUBMATCH(AT_LEAST_ONE(HEADER_NAME_CHARACTER)) \
 	":" MANY(LWS) \
-	SUBMATCH(  /* HEADER VALUE: 2 */ \
-		AT_LEAST_ONE(HEADER_VALUE_CHARACTER) \
-		MANY(SUBMATCH( \
-			CR_LF \
-			AT_LEAST_ONE(LWS) \
-			AT_LEAST_ONE(HEADER_VALUE_CHARACTER))))) \
-		CR_LF
+	SUBMATCH(AT_LEAST_ONE(HEADER_VALUE_CHARACTER)) CR_LF)
 
 #define CHUNK_REGEX_STR \
 	FULL_ANCHOR( \
@@ -345,8 +354,8 @@ static inline int get_headers_recursive(unsigned depth, HTTP_Header** headers,
 	else
 	{
 		StringRef matches[header_num_matches];
-		if(regex_match(&response_regex, matches, header_text,
-				response_num_matches) == REG_NOMATCH)
+		if(regex_match(&header_regex, matches, header_text,
+				header_num_matches) == REG_NOMATCH)
 			return malformed_line;
 
 		int error = get_headers_recursive(depth + 1, headers, num_headers,
@@ -461,7 +470,7 @@ static inline int read_chunked_body(HTTP_Message* message, FILE* connection)
 
 int read_body(HTTP_Message* message, FILE* connection)
 {
-	HTTP_Header* header;
+	const HTTP_Header* header;
 
 	//Try chunked first. Ignore Content-Length
 	//https://stackoverflow.com/questions/3304126/chunked-encoding-and-content-length-header

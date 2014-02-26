@@ -122,7 +122,7 @@ void clear_request(HTTP_Message*);
 void clear_response(HTTP_Message*);
 
 //Find a header.
-HTTP_Header* find_header(HTTP_Message*, StringRef);
+const HTTP_Header* find_header(const HTTP_Message*, StringRef);
 
 //Call this ONCE PER PROGRAM. Before threads.
 void init_http();

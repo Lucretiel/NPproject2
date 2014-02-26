@@ -54,7 +54,7 @@ int main(int argc, char **argv)
 		printf("Accepted connection\n");
 
 		FILE* connection = fdopen(connection_fd, "r+");
-		HTTP_Message message;
+		HTTP_Message message = empty_message;
 		printf("Reading HTTP request line\n");
 		read_request_line(&message, connection);
 		printf("\tMethod: %d\n\tDomain: %.*s\n\tPath: %.*s\n\tVersion: %c\n",
