@@ -12,34 +12,36 @@
 
 //TODO: io error checking
 
-static inline int write_request_line(HTTP_ReqLine* line, FILE* connection)
+#define WRITE(...) dprintf(connection, __VA_ARGS__)
+
+static inline int write_request_line(HTTP_ReqLine* line, int connection)
 {
 	switch(line->method)
 	{
 	case head:
-		fputs("HEAD ", connection);
+		WRITE("HEAD ");
 		break;
 	case get:
-		fputs("GET ", connection);
+		WRITE("GET ");
 		break;
 	case post:
-		fputs("POST ", connection);
+		WRITE("POST ");
 		break;
 	}
 
 	if(line->domain.size)
-		fprintf(connection, "http://%.*s", (int)ES_SIZESTRING(&line->domain));
+		WRITE("http://%.*s", (int)ES_SIZESTRING(&line->domain));
 
-	fprintf(connection, "/%.*s HTTP/1.%c\r\n",
+	WRITE("/%.*s HTTP/1.%c\r\n",
 		(int)ES_SIZESTRING(&line->path),
 		line->http_version);
 	return 0;
 }
 
 //Write the response line
-static inline int write_response_line(HTTP_RespLine* line, FILE* connection)
+static inline int write_response_line(HTTP_RespLine* line, int connection)
 {
-	fprintf(connection, "HTTP/1.%c %d %.*s\r\n",
+	WRITE("HTTP/1.%c %d %.*s\r\n",
 		line->http_version,
 		line->status,
 		(int)ES_SIZESTRING(&line->phrase));
@@ -47,37 +49,36 @@ static inline int write_response_line(HTTP_RespLine* line, FILE* connection)
 }
 
 //Write a header
-static inline int write_header(HTTP_Header* header, FILE* connection)
+static inline int write_headers(HTTP_Header* header, int connection)
 {
-	fprintf(connection, "%.*s: %.*s\r\n",
-		(int)ES_SIZESTRING(&header->name),
-		(int)ES_SIZESTRING(&header->value));
+	while(header)
+	{
+		WRITE("%.*s: %.*s\r\n",
+			(int)ES_SIZESTRING(&header->name),
+			(int)ES_SIZESTRING(&header->value));
+		header = header->next;
+	}
 	return 0;
 }
 
 //Write all headers, empty line, and body
 //TODO: support for live forwarding of chunked encoding.
-static inline int write_common(HTTP_Message* message, FILE* connection)
+static inline int write_common(HTTP_Message* message, int connection)
 {
 	//Write headers
-	for(int i = 0; i < message->num_headers; ++i)
-		write_header(message->headers + i, connection);
+	write_headers(message->headers, connection);
 
 	//Write blank line
-	fputs("\r\n", connection);
+	WRITE("\r\n");
 
 	//Write body
-	fwrite(ES_STRINGSIZE(&message->body), 1, connection);
-
-	//flush
-	if(FLUSH_HTTP_MSGS)
-		fflush(connection);
+	WRITE("%.*s", (int)ES_SIZESTRCNST(&message->body));
 
 	return 0;
 }
 
 //Write a whole request
-int write_request(HTTP_Message* request, FILE* connection)
+int write_request(HTTP_Message* request, int connection)
 {
 	if(write_request_line(&request->request, connection))
 		return -1;
@@ -86,7 +87,7 @@ int write_request(HTTP_Message* request, FILE* connection)
 	return 0;
 }
 
-int write_response(HTTP_Message* response, FILE* connection)
+int write_response(HTTP_Message* response, int connection)
 {
 	if(write_response_line(&response->response, connection))
 		return -1;

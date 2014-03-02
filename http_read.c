@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <regex.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 
 #include "http.h"
 #include "ReadableRegex/readable_regex.h"
@@ -22,21 +24,21 @@ const HTTP_Header* find_header(const HTTP_Message* message, StringRef header_nam
 {
 	String name_lower = es_tolower(header_name);
 	StringRef name_lower_ref = es_ref(&name_lower);
-	const HTTP_Header* headers = message->headers;
 
-	for(int i = 0; i < message->num_headers; ++i)
+	#define RETURN(HEADER) { es_free(&name_lower); return (HEADER); }
+
+	for(const HTTP_Header* header = message->headers; header;
+			header = header->next)
 	{
-		String lower = es_tolower(es_ref(&headers[i].name));
+		String lower = es_tolower(es_ref(&header->name));
 		int cmp = es_compare(name_lower_ref, es_ref(&lower));
 		es_free(&lower);
-		if(cmp == 0)
-		{
-			es_free(&name_lower);
-			return headers + i;
-		}
+		if(cmp == 0) RETURN(header);
 	}
-	es_free(&name_lower);
-	return 0;
+
+	RETURN(0)
+
+	#undef RETURN
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -126,8 +128,7 @@ inline static int regex_match(const regex_t* regex, RegexMatches matches,
 
 
 //All printed characters except colon
-//#define HEADER_NAME_CHARACTER CLASS("]a-z0-9[!\"#$%&'()*+,./:;<=>?@[\\^_`{|}~]-")
-#define HEADER_NAME_CHARACTER CLASS("a-z0-9-")
+#define HEADER_NAME_CHARACTER CLASS("]a-z0-9[!\"#$%&'()*+,./;<=>?@[\\^_`{|}~-")
 
 //TODO: update this to support \r inline
 //#define HEADER_VALUE_CHARACTER CLASS("\t[:print:]")
@@ -144,22 +145,22 @@ inline static int regex_match(const regex_t* regex, RegexMatches matches,
  * have some
  */
 
-//#define HEADER_REGEX_STR FRONT_ANCHOR( \
-//	SUBMATCH( /* HEADER NAME: 1 */ \
-//		AT_LEAST_ONE(HEADER_NAME_CHARACTER)) \
-//	":" MANY(LWS) \
-//	SUBMATCH(  /* HEADER VALUE: 2 */ \
-//		AT_LEAST_ONE(HEADER_VALUE_CHARACTER) \
-//		MANY(SUBMATCH( \
-//			CR_LF \
-//			AT_LEAST_ONE(LWS) \
-//			AT_LEAST_ONE(HEADER_VALUE_CHARACTER))))) \
-//		CR_LF
+#define HEADER_REGEX_STR \
+	FRONT_ANCHOR( \
+		SUBMATCH( AT_LEAST_ONE(HEADER_NAME_CHARACTER)) \
+		":" MANY(LWS) \
+		SUBMATCH(  /* HEADER VALUE: 2 */ \
+			AT_LEAST_ONE(HEADER_VALUE_CHARACTER) \
+			MANY(SUBMATCH( \
+				CR_LF \
+				AT_LEAST_ONE(LWS) \
+				AT_LEAST_ONE(HEADER_VALUE_CHARACTER)))) \
+			CR_LF)
 
-#define HEADER_REGEX_STR FRONT_ANCHOR( \
-	SUBMATCH(AT_LEAST_ONE(HEADER_NAME_CHARACTER)) \
-	":" MANY(LWS) \
-	SUBMATCH(AT_LEAST_ONE(HEADER_VALUE_CHARACTER)) CR_LF)
+//#define HEADER_REGEX_STR FRONT_ANCHOR( \
+//	SUBMATCH(AT_LEAST_ONE(HEADER_NAME_CHARACTER)) \
+//	":" MANY(LWS) \
+//	SUBMATCH(AT_LEAST_ONE(HEADER_VALUE_CHARACTER)) CR_LF)
 
 #define CHUNK_REGEX_STR \
 	FULL_ANCHOR( \
@@ -239,20 +240,70 @@ void deinit_http()
 // READS
 ///////////////////////////////////////////////////////////////////////////////
 
-//TODO: max line lengths
-int read_request_line(HTTP_Message* message, FILE* connection)
+//GENERIC
+
+//Perform a fixed-length TCP read
+static inline int tcp_read_fixed(int fd, char* buffer, size_t size)
+{
+	return recv(fd, buffer, size, MSG_WAITALL) == size ? 0 : connection_error;
+}
+
+//Read up to delimiting character.
+const static size_t buffer_size = 4096;
+String tcp_read_line(int fd, char delim, size_t max)
+{
+	String result = es_empty_string;
+	char c;
+	int read_error = 0;
+
+	do
+	{
+		char buffer[buffer_size];
+		size_t amount_read = 0;
+
+		for(size_t i = 0; i < buffer_size; ++i)
+		{
+			if((read_error = tcp_read_fixed(fd, &c, 1)))
+				break;
+
+			buffer[i] = c;
+			++amount_read;
+			--max;
+
+			if(c == delim)
+				break;
+		}
+
+		es_append(&result, es_tempn(buffer, amount_read));
+
+	} while(c != delim && read_error == 0 && max);
+
+	return result;
+}
+
+//FIXME: SO MUCH CODE REPITITION
+//Especially the tcp_read_line error checking, http version, etc
+int read_request_line(HTTP_Message* message, int connection)
 {
 	//read a line
-	String line = es_readline(connection, '\n', MAX_MSG_LINE_SIZE);
+	String line = tcp_read_line(connection, '\n', MAX_MSG_LINE_SIZE);
 	#define RETURN(CODE) { es_free(&line); return (CODE); }
 
-	if(ferror(connection) || feof(connection)) RETURN(connection_error);
+	//If the last character isn't a newline
+	if(es_cstrc(&line)[line.size-1] != '\n')
+	{
+		//If we hit the max
+		if(line.size >= MAX_MSG_LINE_SIZE)
+			RETURN(too_long)
+		//Otherwise, assume a connection error
+		else
+			RETURN(connection_error)
+	}
 
-	//TODO: check for regex out-of-memory error
 	//Match the regex
 	StringRef matches[request_num_matches];
 	if(regex_match(&request_regex, matches, es_ref(&line),
-			request_num_matches) == REG_NOMATCH)
+			request_num_matches))
 		RETURN(malformed_line);
 
 	//Get the method
@@ -276,7 +327,8 @@ int read_request_line(HTTP_Message* message, FILE* connection)
 	//Get the HTTP Version
 	{
 		StringRef version = REGEX_PART(request_match_version);
-		if(es_compare(es_temp("1.1"), version) && es_compare(es_temp("1.0"), version))
+		if(es_compare(es_temp("1.1"), version) &&
+				es_compare(es_temp("1.0"), version))
 			RETURN(bad_version)
 		else
 			message->request.http_version = version.begin[2];
@@ -292,19 +344,25 @@ int read_request_line(HTTP_Message* message, FILE* connection)
 	#undef RETURN
 }
 
-int read_response_line(HTTP_Message* message, FILE* connection)
+int read_response_line(HTTP_Message* message, int connection)
 {
 	//Read a line
-	String line = es_readline(connection, '\n', MAX_MSG_LINE_SIZE);
+	String line = tcp_read_line(connection, '\n', MAX_MSG_LINE_SIZE);
 	#define RETURN(CODE) { es_free(&line); return (CODE); }
 
-	//Check for read errors
-	if(ferror(connection) || feof(connection)) RETURN(connection_error)
+	//If the last character isn't a newline
+	if(es_cstrc(&line)[line.size-1] != '\n')
+	{
+		//If we hit the max
+		if(line.size >= MAX_MSG_LINE_SIZE) RETURN(too_long)
+
+		//Otherwise, assume a connection error
+		else RETURN(connection_error)
+	}
 
 	//Match the response regex
 	StringRef matches[response_num_matches];
-	if(regex_match(&response_regex, matches, es_ref(&line),
-			response_num_matches) == REG_NOMATCH)
+	if(regex_match(&response_regex, matches, es_ref(&line), response_num_matches))
 		RETURN(malformed_line)
 
 	//TODO: reduce code repitition between here and request
@@ -328,119 +386,177 @@ int read_response_line(HTTP_Message* message, FILE* connection)
 	#undef RETURN
 }
 
+//True if a line is only '\r\n' or '\n'
 static inline int empty_line(StringRef line)
 {
 	return es_compare(es_temp("\r\n"), line) == 0 ||
 		es_compare(es_temp("\n"), line) == 0;
 }
 
-static inline int get_headers_recursive(unsigned depth, HTTP_Header** headers,
-	unsigned* num_headers, StringRef header_text)
+static inline int parse_headers(HTTP_Header** headers, StringRef header_text)
 {
-	if(depth > MAX_NUM_HEADERS)
-	{
-		return too_many_headers;
-	}
-	else if(empty_line(header_text))
-	{
+	HTTP_Header* back = 0;
+	HTTP_Header* front = 0;
 
-		if(depth != *num_headers)
-		{
-			*num_headers = depth;
-			*headers = realloc(*headers, depth * sizeof(HTTP_Header));
-		}
-		return 0;
-	}
-	else
+	//Free all headers on error
+	#define CLEAR_RETURN(CODE) \
+		{ while(back) { \
+			HTTP_Header* tmp = back; back = back->next; \
+			es_free(&tmp->name); es_free(&tmp->value); free(tmp); \
+		} return (CODE); }
+
+	size_t header_i;
+	for(header_i = 0; header_i < MAX_NUM_HEADERS; ++header_i)
 	{
+		//Done on empty line
+		if(empty_line(header_text))
+			break;
+
+		//Match the next header
 		StringRef matches[header_num_matches];
-		if(regex_match(&header_regex, matches, header_text,
-				header_num_matches) == REG_NOMATCH)
-			return malformed_line;
+		if(regex_match(&header_regex, matches, header_text, header_num_matches))
+			CLEAR_RETURN(malformed_line)
 
-		int error = get_headers_recursive(depth + 1, headers, num_headers,
-			es_slice(header_text, REGEX_PART(header_match_all).size,
-				header_text.size));
+		//Allocate and assign
+		HTTP_Header* new_header = calloc(1, sizeof(HTTP_Header));
+		new_header->name = es_copy(REGEX_PART(header_match_name));
+		new_header->value = es_copy(REGEX_PART(header_match_value));
 
-		if(error) return error;
+		//Attach the new header to the list
+		if(!back)
+			back = new_header;
+		if(front)
+			front->next = new_header;
+		front = new_header;
 
-		(*headers)[depth].name = es_copy(REGEX_PART(header_match_name));
-		(*headers)[depth].value = es_copy(REGEX_PART(header_match_value));
-		return 0;
+		//Remove this header from the text
+		header_text = es_slice(header_text, REGEX_PART(header_match_all).size,
+			header_text.size);
 	}
+
+	//If there are too many headers, discard and return
+	if(header_i >= MAX_NUM_HEADERS)
+		CLEAR_RETURN(too_many_headers);
+
+	//Add these headers to the front
+	if(front)
+		front->next = *headers;
+	if(back)
+		*headers = back;
+
+	return 0;
+	#undef CLEAR_RETURN
 }
 
-int read_headers(HTTP_Message* message, FILE* connection)
+int read_headers(HTTP_Message* message, int connection)
 {
-	//Read up to the empty line.
 	String headers = es_empty_string;
 	#define RETURN(CODE) { es_free(&headers); return (CODE); }
 
 	//Read all the headers, up to a blank line or MAX_HEADER_SIZE
+	int done = 0;
+	do
 	{
-		String line = es_empty_string;
-		do
-		{
-			es_free(&line);
-			line = es_readline(connection, '\n', MAX_HEADER_SIZE);
-			es_append(&headers, es_ref(&line));
-		} while(!empty_line(es_ref(&line)) && headers.size <= MAX_HEADER_SIZE);
+		//Read a line
+		String line = tcp_read_line(connection, '\n', MAX_HEADER_LINE_SIZE);
 
+		//If the last character isn't a newline, something went wrong
+		if(es_cstrc(&line)[line.size-1] != '\n')
+		{
+			es_free(&headers);
+			es_free(&line);
+
+			//If we hit the max
+			if(line.size >= MAX_HEADER_LINE_SIZE) return too_long;
+
+			//Otherwise, assume a connection error
+			else return connection_error;
+		}
+
+		//Append this line
+		es_append(&headers, es_ref(&line));
+
+		//If we found the empty line, we're done
+		if(empty_line(es_ref(&line))) done = 1;
+
+		//Free the line
 		es_free(&line);
-	}
+
+		//Continue while we haven't found the empty line, or gone over MAX
+	} while(!done && headers.size <= MAX_HEADER_SIZE);
 
 	//If all headers are too long, error
 	if(headers.size > MAX_HEADER_SIZE) RETURN(too_long);
 
 	//Parse headers
-	int error = get_headers_recursive(message->num_headers, &message->headers,
-		&message->num_headers, es_ref(&headers));
-	if(error) RETURN(error)
+	int error = parse_headers(&message->headers, es_ref(&headers));
 
-	RETURN(0)
+	RETURN(error);
+
 	#undef RETURN
 }
 
-static inline int read_fixed_body(HTTP_Message* message, FILE* connection,
-	size_t size)
+static inline int read_fixed_body(HTTP_Message* message, int connection, size_t size)
 {
+	//Real simple fixed size read
 	if(size)
 	{
-		char* data = malloc(size);
-		size_t amount_read = fread(data, 1, size, connection);
-		if(amount_read != size)
+		char* buffer = malloc(size);
+		if(tcp_read_fixed(connection, buffer, size))
 		{
-			free(data);
+			free(buffer);
 			return connection_error;
 		}
-		message->body = es_move_cstrn(data, size);
+		message->body = es_move_cstrn(buffer, size);
 	}
 	return 0;
 }
 
-static inline int read_chunked_body(HTTP_Message* message, FILE* connection)
+static inline int read_chunked_body(HTTP_Message* message, int connection)
 {
+	//length of the next chunk
 	unsigned chunk_length = 0;
+
+	//String to read into
 	String body = es_empty_string;
+
+	//buffer to read each chunk into. Reused, but reallocated if necessary
 	char* read_buffer = 0;
 	unsigned buffer_size = 0;
+
 	#define RETURN(CODE) { es_free(&body); free(read_buffer); return (CODE); }
 
+	//Read each chunk till a length 0 chunk
 	do
 	{
-		String chunk_head = es_readline(connection, '\n', MAX_CHUNK_HEADER_SIZE);
-		#define RETURN1(CODE) { es_free(&chunk_head); RETURN(CODE); }
+		//Read the chunk length line
+		String chunk_head = tcp_read_line(connection, '\n', MAX_CHUNK_HEADER_SIZE);
+		#define RETURN1(CODE) { es_free(&chunk_head); RETURN(CODE) }
 
+		//If the last character isn't a newline
+		if(es_cstrc(&chunk_head)[chunk_head.size-1] != '\n')
+		{
+			//If we hit the max
+			if(chunk_head.size >= MAX_CHUNK_HEADER_SIZE)
+				RETURN(too_long)
+			//Otherwise, assume a connection error
+			else
+				RETURN(connection_error)
+		}
+
+		//Match the chunk length line
 		StringRef matches[chunk_num_matches];
 		if(regex_match(&request_regex, matches, es_ref(&chunk_head),
-				request_num_matches) == REG_NOMATCH)
+				request_num_matches))
 			RETURN1(malformed_line)
 
+		//Get the chunk length. Remember- it's hex, not decimal
 		chunk_length = strtoul(es_ref(&chunk_head).begin, 0, 16);
 
-		if(chunk_length > MAX_CHUNK_SIZE)
-			RETURN1(too_long)
+		//self explanatory
+		if(chunk_length > MAX_CHUNK_SIZE) RETURN1(too_long)
 
+		//Reallocate buffer if needed
 		if(chunk_length < buffer_size)
 		{
 			free(read_buffer);
@@ -448,15 +564,21 @@ static inline int read_chunked_body(HTTP_Message* message, FILE* connection)
 			buffer_size = chunk_length;
 		}
 
-		unsigned amount_read = fread(read_buffer, 1, chunk_length, connection);
-		if(amount_read != chunk_length)
+		//Read the chunk
+		if(tcp_read_fixed(connection, read_buffer, chunk_length))
 			RETURN1(connection_error)
 
+		//Append the chunk
 		es_append(&body, es_tempn(read_buffer, chunk_length));
 		#undef RETURN1
+
+		//Free the line
 		es_free(&chunk_head);
+
+	//Repeat until MAX_BODY_SIZE or a length 0 chunk
 	} while(chunk_length != 0 && body.size <= MAX_BODY_SIZE);
 
+	//Error
 	if(body.size > MAX_BODY_SIZE) RETURN(too_long)
 
 	int header_error = read_headers(message, connection);
@@ -467,8 +589,7 @@ static inline int read_chunked_body(HTTP_Message* message, FILE* connection)
 	#undef RETURN
 }
 
-
-int read_body(HTTP_Message* message, FILE* connection)
+int read_body(HTTP_Message* message, int connection)
 {
 	const HTTP_Header* header;
 
@@ -495,7 +616,6 @@ int read_body(HTTP_Message* message, FILE* connection)
 
 	//Nothing found. No body
 	return 0;
-
 }
 
 

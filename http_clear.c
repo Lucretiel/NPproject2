@@ -8,18 +8,20 @@
 #include <stdlib.h>
 #include "http.h"
 
-static inline void clear_header(HTTP_Header* header)
+static inline void clear_headers(HTTP_Header* header)
 {
-	es_free(&header->name);
-	es_free(&header->value);
+	if(header)
+	{
+		es_free(&header->name);
+		es_free(&header->value);
+		clear_headers(header->next);
+		free(header);
+	}
 }
 
 static inline void clear_common(HTTP_Message* message)
 {
-	for(int i = 0; i < message->num_headers; ++i)
-		clear_header(message->headers + i);
-	free(message->headers);
-	message->num_headers = 0;
+	clear_headers(message->headers);
 	message->headers = 0;
 	es_clear(&message->body);
 }

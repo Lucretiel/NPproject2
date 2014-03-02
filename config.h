@@ -9,13 +9,22 @@
 
 #pragma once
 
-const static unsigned long MAX_MSG_LINE_SIZE = 1024 * 1024;
+//Max length of a request/response line
+const static unsigned long MAX_MSG_LINE_SIZE = 1024;
+
+//Max size of any header line
+const static unsigned long MAX_HEADER_LINE_SIZE = 1024;
+
+//This is the max combined size of ALL headers
 const static unsigned long MAX_HEADER_SIZE = 1024 * 1024;
+
+//Max supported body size
 const static unsigned long MAX_BODY_SIZE = 1024 * 1024 * 1024;
+
+//Max size of a chunked encoding line
 const static unsigned long MAX_CHUNK_HEADER_SIZE = 1024;
+
+//Max size of a chunked encoding chunk
 const static unsigned long MAX_CHUNK_SIZE = 1024 * 1024;
 
 const static int MAX_NUM_HEADERS = 1024;
-
-//If true, each request and response will be flushed after being written
-const static int FLUSH_HTTP_MSGS = 1;

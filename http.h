@@ -9,7 +9,6 @@
 
 #pragma once
 
-#include <stdio.h> //For FILE*
 #include "EasyString/easy_string.h"
 
 /*
@@ -45,10 +44,11 @@ typedef struct
  * HTTP_Header contains the data for a single header. It has 2 null-terminated
  * strings for each of the name and value.
  */
-typedef struct
+typedef struct _http_header
 {
 	String name;
 	String value;
+	struct _http_header* next;
 } HTTP_Header;
 
 /*
@@ -78,7 +78,6 @@ typedef struct
 	};
 
 	HTTP_Header* headers;
-	unsigned num_headers;
 
 	String body;
 } HTTP_Message;
@@ -106,23 +105,23 @@ enum
 };
 
 //Read the first HTTP Line
-int read_request_line(HTTP_Message*, FILE*);
-int read_response_line(HTTP_Message*, FILE*);
+int read_request_line(HTTP_Message* message, int fd);
+int read_response_line(HTTP_Message* message, int fd);
 
 //Read all headers
-int read_headers(HTTP_Message*, FILE*);
+int read_headers(HTTP_Message* message, int fd);
 
 //Read the body
-int read_body(HTTP_Message*, FILE*);
+int read_body(HTTP_Message* message, int fd);
 
-int write_request(HTTP_Message*, FILE*);
-int write_response(HTTP_Message*, FILE*);
+int write_request(HTTP_Message* message, int fd);
+int write_response(HTTP_Message* message, int fd);
 
-void clear_request(HTTP_Message*);
-void clear_response(HTTP_Message*);
+void clear_request(HTTP_Message* message);
+void clear_response(HTTP_Message* message);
 
 //Find a header.
-const HTTP_Header* find_header(const HTTP_Message*, StringRef);
+const HTTP_Header* find_header(const HTTP_Message* message, StringRef header);
 
 //Call this ONCE PER PROGRAM. Before threads.
 void init_http();

@@ -55,30 +55,37 @@ int main(int argc, char **argv)
 
 		FILE* connection = fdopen(connection_fd, "r+");
 		HTTP_Message message = empty_message;
+
 		printf("Reading HTTP request line\n");
-		read_request_line(&message, connection);
-		printf("\tMethod: %d\n\tDomain: %.*s\n\tPath: %.*s\n\tVersion: %c\n",
-				message.request.method,
-				(int)ES_SIZESTRCNST(&message.request.domain),
-				(int)ES_SIZESTRCNST(&message.request.path),
-				message.request.http_version);
+		if(read_request_line(&message, connection))
+		{
+			printf("Error reading HTTP request\n");
+			clear_request(&message);
+			fclose(connection);
+			continue;
+		}
 
 		printf("Reading HTTP headers\n");
-		read_headers(&message, connection);
-		printf("Got %d headers\n", message.num_headers);
-		for(int i = 0; i < message.num_headers; ++i)
-			printf("\t%.*s: %.*s\n",
-				(int)ES_SIZESTRCNST(&message.headers[i].name),
-				(int)ES_SIZESTRCNST(&message.headers[i].value));
+		if(read_headers(&message, connection))
+		{
+			printf("Error reading HTTP headers\n");
+			clear_request(&message);
+			fclose(connection);
+			continue;
+		}
 
 		printf("Reading HTTP body\n");
-		read_body(&message, connection);
-		if(message.body.size > 0)
-			printf("Got body\n%.*s\n", (int)ES_SIZESTRCNST(&message.body));
+		if(read_body(&message, connection))
+		{
+			printf("Error reading HTTP body\n");
+			clear_request(&message);
+			fclose(connection);
+			continue;
+		}
 
 		printf("Forwarding\n");
 
-		printf("Connecting to remote\n");
+		printf("Opening socket\n");
 		int client_sock = socket(PF_INET, SOCK_STREAM, 0);
 		if(client_sock < 0)
 		{
@@ -86,17 +93,17 @@ int main(int argc, char **argv)
 			return 1;
 		}
 
-		struct addrinfo* result;
-		//Need to get null terminated string :(
-		char* domain = calloc(message.request.domain.size, 1);
-		memcpy(domain, ES_STRCNSTSIZE(&message.request.domain));
-		getaddrinfo(domain, "http", 0, &result);
-		free(domain); domain = 0;
-		if(connect(client_sock, result->ai_addr, sizeof(*result->ai_addr)) < 0)
+		printf("Looking up host\n");
+		struct addrinfo* host_info;
+		getaddrinfo(es_cstrc(&message.request.domain), "http", 0, &host_info);
+
+		printf("Connecting to host\n");
+		if(connect(client_sock, host_info->ai_addr, sizeof(*host_info->ai_addr)) < 0)
 		{
-			perror("FUCK\n");
+			printf("Failed to connect to host\n");
 			exit(1);
 		}
+		freeaddrinfo(host_info);
 
 		FILE* server_connection = fdopen(client_sock, "r+");
 
@@ -120,7 +127,6 @@ int main(int argc, char **argv)
 		clear_response(&message);
 		fclose(server_connection);
 		fclose(connection);
-		freeaddrinfo(result);
 	}
 
 	close(server_sock);
