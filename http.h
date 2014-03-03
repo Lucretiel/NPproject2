@@ -104,6 +104,7 @@ enum
 	too_many_headers //There are too many headers
 };
 
+//// READS
 //Read the first HTTP Line
 int read_request_line(HTTP_Message* message, int fd);
 int read_response_line(HTTP_Message* message, int fd);
@@ -114,14 +115,26 @@ int read_headers(HTTP_Message* message, int fd);
 //Read the body
 int read_body(HTTP_Message* message, int fd);
 
+//// WRITES
 int write_request(HTTP_Message* message, int fd);
 int write_response(HTTP_Message* message, int fd);
 
+//// CLEARS
 void clear_request(HTTP_Message* message);
 void clear_response(HTTP_Message* message);
 
+////MANIPULATORS
 //Find a header.
 const HTTP_Header* find_header(const HTTP_Message* message, StringRef header);
+
+//Add a header
+void add_header(HTTP_Message* message, StringRef name, StringRef value);
+
+//Set the response code, and an appropriate phrase
+void set_response(HTTP_Message* message, int code);
+
+//Get an appropriate phrase for a given response code
+const char* response_phrase(int code)
 
 //Call this ONCE PER PROGRAM. Before threads.
 void init_http();

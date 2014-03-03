@@ -16,32 +16,6 @@
 #include "config.h"
 
 ///////////////////////////////////////////////////////////////////////////////
-// UTILITY
-///////////////////////////////////////////////////////////////////////////////
-
-//Find a header
-const HTTP_Header* find_header(const HTTP_Message* message, StringRef header_name)
-{
-	String name_lower = es_tolower(header_name);
-	StringRef name_lower_ref = es_ref(&name_lower);
-
-	#define RETURN(HEADER) { es_free(&name_lower); return (HEADER); }
-
-	for(const HTTP_Header* header = message->headers; header;
-			header = header->next)
-	{
-		String lower = es_tolower(es_ref(&header->name));
-		int cmp = es_compare(name_lower_ref, es_ref(&lower));
-		es_free(&lower);
-		if(cmp == 0) RETURN(header);
-	}
-
-	RETURN(0)
-
-	#undef RETURN
-}
-
-///////////////////////////////////////////////////////////////////////////////
 // GENERIC REGEX LIBRARY
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -248,8 +222,18 @@ static inline int tcp_read_fixed(int fd, char* buffer, size_t size)
 	return recv(fd, buffer, size, MSG_WAITALL) == size ? 0 : connection_error;
 }
 
-//Read up to delimiting character.
-const static size_t buffer_size = 4096;
+/*
+ * Read up to delimiting character.
+ *
+ * Here's where we see the real advantage of a string library. Normally this
+ * sort of code would involve an unpleasant amount of pointer manipulation,
+ * but by using es_append we can use a static, stack-allocated local buffer
+ * and let the library take care of automatic allocation. NO EXPLICT POINTERS.
+ * Plus, es_append smartly doubles the allocation size every time, so the only
+ * library overhead (besides increased memory use on the stack) is perhaps a
+ * few too many memcpys
+ */
+const static size_t tcp_read_buffer_size = 256;
 String tcp_read_line(int fd, char delim, size_t max)
 {
 	String result = es_empty_string;
@@ -258,10 +242,10 @@ String tcp_read_line(int fd, char delim, size_t max)
 
 	do
 	{
-		char buffer[buffer_size];
+		char buffer[tcp_read_buffer_size];
 		size_t amount_read = 0;
 
-		for(size_t i = 0; i < buffer_size; ++i)
+		for(size_t i = 0; i < tcp_read_buffer_size; ++i)
 		{
 			if((read_error = tcp_read_fixed(fd, &c, 1)))
 				break;
@@ -393,18 +377,8 @@ static inline int empty_line(StringRef line)
 		es_compare(es_temp("\n"), line) == 0;
 }
 
-static inline int parse_headers(HTTP_Header** headers, StringRef header_text)
+static inline int parse_headers(HTTP_Message* message, StringRef header_text)
 {
-	HTTP_Header* back = 0;
-	HTTP_Header* front = 0;
-
-	//Free all headers on error
-	#define CLEAR_RETURN(CODE) \
-		{ while(back) { \
-			HTTP_Header* tmp = back; back = back->next; \
-			es_free(&tmp->name); es_free(&tmp->value); free(tmp); \
-		} return (CODE); }
-
 	size_t header_i;
 	for(header_i = 0; header_i < MAX_NUM_HEADERS; ++header_i)
 	{
@@ -415,19 +389,11 @@ static inline int parse_headers(HTTP_Header** headers, StringRef header_text)
 		//Match the next header
 		StringRef matches[header_num_matches];
 		if(regex_match(&header_regex, matches, header_text, header_num_matches))
-			CLEAR_RETURN(malformed_line)
+			return malformed_line;
 
-		//Allocate and assign
-		HTTP_Header* new_header = calloc(1, sizeof(HTTP_Header));
-		new_header->name = es_copy(REGEX_PART(header_match_name));
-		new_header->value = es_copy(REGEX_PART(header_match_value));
-
-		//Attach the new header to the list
-		if(!back)
-			back = new_header;
-		if(front)
-			front->next = new_header;
-		front = new_header;
+		//Add the header
+		add_header(message, REGEX_PART(header_match_name),
+			REGEX_PART(header_match_value));
 
 		//Remove this header from the text
 		header_text = es_slice(header_text, REGEX_PART(header_match_all).size,
@@ -436,13 +402,7 @@ static inline int parse_headers(HTTP_Header** headers, StringRef header_text)
 
 	//If there are too many headers, discard and return
 	if(header_i >= MAX_NUM_HEADERS)
-		CLEAR_RETURN(too_many_headers);
-
-	//Add these headers to the front
-	if(front)
-		front->next = *headers;
-	if(back)
-		*headers = back;
+		return too_many_headers;
 
 	return 0;
 	#undef CLEAR_RETURN
@@ -489,7 +449,7 @@ int read_headers(HTTP_Message* message, int connection)
 	if(headers.size > MAX_HEADER_SIZE) RETURN(too_long);
 
 	//Parse headers
-	int error = parse_headers(&message->headers, es_ref(&headers));
+	int error = parse_headers(message, es_ref(&headers));
 
 	RETURN(error);
 

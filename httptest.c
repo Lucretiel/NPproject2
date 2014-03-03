@@ -12,8 +12,11 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+
 
 #include "http.h"
 
@@ -50,44 +53,43 @@ int main(int argc, char **argv)
 		struct sockaddr_in client;
 		unsigned len = sizeof(client);
 		printf("Awaiting Connection\n");
-		int connection_fd = accept(server_sock, (struct sockaddr*)&client, &len);
+		int client_fd = accept(server_sock, (struct sockaddr*)&client, &len);
 		printf("Accepted connection\n");
 
-		FILE* connection = fdopen(connection_fd, "r+");
 		HTTP_Message message = empty_message;
 
 		printf("Reading HTTP request line\n");
-		if(read_request_line(&message, connection))
+		if(read_request_line(&message, client_fd))
 		{
 			printf("Error reading HTTP request\n");
 			clear_request(&message);
-			fclose(connection);
+			close(client_fd);
 			continue;
 		}
 
 		printf("Reading HTTP headers\n");
-		if(read_headers(&message, connection))
+		if(read_headers(&message, client_fd))
 		{
 			printf("Error reading HTTP headers\n");
 			clear_request(&message);
-			fclose(connection);
+			close(client_fd);
 			continue;
 		}
 
 		printf("Reading HTTP body\n");
-		if(read_body(&message, connection))
+		if(read_body(&message, client_fd))
 		{
 			printf("Error reading HTTP body\n");
 			clear_request(&message);
-			fclose(connection);
+			close(client_fd);
 			continue;
 		}
 
 		printf("Forwarding\n");
 
 		printf("Opening socket\n");
-		int client_sock = socket(PF_INET, SOCK_STREAM, 0);
-		if(client_sock < 0)
+		int server_socket = socket(PF_INET, SOCK_STREAM, 0);
+		if(server_socket < 0)
 		{
 			perror("Failed to open socket\n");
 			return 1;
@@ -98,35 +100,36 @@ int main(int argc, char **argv)
 		getaddrinfo(es_cstrc(&message.request.domain), "http", 0, &host_info);
 
 		printf("Connecting to host\n");
-		if(connect(client_sock, host_info->ai_addr, sizeof(*host_info->ai_addr)) < 0)
+		if(connect(server_socket, host_info->ai_addr, sizeof(*host_info->ai_addr)) < 0)
 		{
 			printf("Failed to connect to host\n");
 			exit(1);
 		}
 		freeaddrinfo(host_info);
 
-		FILE* server_connection = fdopen(client_sock, "r+");
-
+		//int server_socket = 1;
 		es_clear(&message.request.domain);
 
 		printf("Writing request\n");
-		write_request(&message, server_connection);
+		write_request(&message, server_socket);
 
 		printf("Clearing request\n");
 		clear_request(&message);
 
 		printf("Reading response\n");
-		read_response_line(&message, server_connection);
-		read_headers(&message, server_connection);
-		read_body(&message, server_connection);
+		read_response_line(&message, server_socket);
+		read_headers(&message, server_socket);
+		read_body(&message, server_socket);
+		//printf("SIKE\n");
 
 		printf("Writing response\n");
-		write_response(&message, connection);
+		write_response(&message, client_fd);
+		//printf("NOPE\n");
 
-		printf("Clearing response\n");
+		printf("Clearing response\n\n");
 		clear_response(&message);
-		fclose(server_connection);
-		fclose(connection);
+		close(server_socket);
+		close(client_fd);
 	}
 
 	close(server_sock);

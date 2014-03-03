@@ -8,24 +8,34 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <pthread.h>
 
+#include "config.h"
 #include "print_thread.h"
 
-typedef struct message
+typedef struct
 {
-	struct message* next;
 	char* text;
+	bool should_free;
 } Message;
+typedef struct message_node
+{
+	struct message_node* next;
+	Message message;
+} MessageNode;
 
+//ALL HAIL THE GLOBAL MESSAGE QUEUE
 //Push to the front, pop off the back
 static struct {
-	Message* front;
-	Message* back;
+	MessageNode* front;
+	MessageNode* back;
+	bool shutdown;
 
 	pthread_mutex_t mutex;
 	pthread_cond_t print_signal; //When the printer is waiting for a message
 
+	//ALL HAIL THE GLOBAL PRINT THREAD
 	pthread_t printer; //The actual printer thread
 } queue;
 
@@ -50,70 +60,103 @@ static inline void signal_printer()
 }
 
 //Pop the next message off the queue.
-char* get_next()
+static inline bool get_next(Message* message)
 {
-	char* result = 0;
+	//Set to true if a message is retrieved. False means shutdown.
+	bool message_flag = false;
+
 	lock_queue();
+
 	//while there are no new messages and messages are incoming
-	while((!queue.back->next) && (queue.front))
+	while(!queue.back && !queue.shutdown)
 		printer_wait();
 
 	//Either there is a message or we were shutdown (or both)
 
 	//If message
-	if(queue.back->next)
+	if(queue.back)
 	{
-		Message* next_msg = queue.back->next;
-		free(queue.back);
-		queue.back = next_msg;
-		result = next_msg->text;
-		next_msg->text = 0;
-		unlock_queue();
+		//Get the message
+		MessageNode* node = queue.back;
+
+		//Update the back ptr
+		queue.back = node->next;
+
+		//If nessesary, clear the front ptr
+		if(queue.front == node)
+			queue.front = 0;
+
+		//Get the message text
+		*message = node->message;
+
+		//Free message
+		free(node);
+
+		//Set the message flag
+		message_flag = 1;
 	}
 
 	unlock_queue();
-	return result;
+
+	return message_flag;
 }
 
 //Add a message to the queue
-static inline void submit_message(const char* message)
+static inline void submit_message(char* text, bool should_free)
 {
-	Message* new_message = calloc(1, sizeof(Message));
-	size_t message_length = strlen(message);
-	new_message->text = calloc(message_length + 1, sizeof(char));
-	memcpy(new_message->text, message, message_length);
-
 	lock_queue();
 
-	if(queue.front)
+	//If the queue isn't shutdown
+	if(!queue.shutdown)
 	{
-		queue.front->next = new_message;
-		queue.front = new_message;
+		//Create a new node
+		MessageNode* new_node = malloc(sizeof(MessageNode));
+		new_node->message.text = text;
+		new_node->message.should_free = should_free;
+		new_node->next = 0;
+
+		//add the message to the front of the queue
+		if(queue.front)
+			queue.front->next = new_node;
+
+		//set the message to the back of the queue, if necessary
+		if(!queue.back)
+			queue.back = new_node;
+
+		//set the message to the front of the queue
+		queue.front = new_node;
+
+		//Signal the printer
 		signal_printer();
+
+		//Unlock;
 		unlock_queue();
 	}
 	else
 	{
+		//No reason to hold lock while freeing
 		unlock_queue();
-		free(new_message->text);
-		free(new_message);
+
+		if(should_free) free(text);
 	}
+
 }
 
 static inline void shutdown_queue()
 {
 	lock_queue();
-	queue.front = 0;
+	queue.shutdown = true;
 	signal_printer();
 	unlock_queue();
 }
 
 void* print_thread(void* arg)
 {
-	for(char* message = get_next(); message; message = get_next())
+	Message message;
+	while(get_next(&message))
 	{
-		fputs(message, stdout);
-		free(message);
+		printf("%s\n", message.text);
+		if(message.should_free) free(message.text);
 	}
 	return 0;
 }
@@ -124,8 +167,9 @@ void* print_thread(void* arg)
 
 int begin_print_thread()
 {
-	//Initialize message queues
-	queue.front = queue.back = calloc(1, sizeof(Message));
+	//This is implicit for static variables, but better to be explicit
+	queue.front = queue.back = 0;
+	queue.shutdown = 0;
 
 	//Initialize sync primitives
 	pthread_mutex_init(&queue.mutex, 0);
@@ -146,25 +190,27 @@ void end_print_thread()
 	//Wait for the thread
 	pthread_join(queue.printer, 0);
 
-	//Wipe remaining messages
-	Message* message = queue.front;
-	while(message)
-	{
-		Message* to_clear = message;
-		message = message->next;
-		free(to_clear->text);
-		free(to_clear);
-	}
-	//Wipe queue
-	queue.front = 0;
-	queue.back = 0;
-
 	//Clear sync primitives
 	pthread_mutex_destroy(&queue.mutex);
 	pthread_cond_destroy(&queue.print_signal);
 }
 
-void submit_print(const char* message)
+void submit_print(char* message)
 {
-	submit_message(message);
+	submit_message(message, false);
+}
+
+void submit_print_mve(char* message)
+{
+	submit_message(message, true);
+}
+
+void submit_debug(char* message)
+{
+	if(DEBUG_PRINT) submit_print(message);
+}
+
+void submit_debug_mve(char* message)
+{
+	if(DEBUG_PRINT) submit_print_mve(message);
 }

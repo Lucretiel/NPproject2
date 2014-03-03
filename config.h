@@ -27,4 +27,8 @@ const static unsigned long MAX_CHUNK_HEADER_SIZE = 1024;
 //Max size of a chunked encoding chunk
 const static unsigned long MAX_CHUNK_SIZE = 1024 * 1024;
 
+//Max number of headers
 const static int MAX_NUM_HEADERS = 1024;
+
+//If true, debug prints will be sent
+const static int DEBUG_PRINT = 1;
