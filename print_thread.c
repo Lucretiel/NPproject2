@@ -14,15 +14,10 @@
 #include "config.h"
 #include "print_thread.h"
 
-typedef struct
-{
-	char* text;
-	bool should_free;
-} Message;
 typedef struct message_node
 {
 	struct message_node* next;
-	Message message;
+	String message;
 } MessageNode;
 
 //ALL HAIL THE GLOBAL MESSAGE QUEUE
@@ -60,7 +55,7 @@ static inline void signal_printer()
 }
 
 //Pop the next message off the queue.
-static inline bool get_next(Message* message)
+static inline bool get_next(String* message)
 {
 	//Set to true if a message is retrieved. False means shutdown.
 	bool message_flag = false;
@@ -102,7 +97,7 @@ static inline bool get_next(Message* message)
 }
 
 //Add a message to the queue
-static inline void submit_message(char* text, bool should_free)
+static inline void submit_message(String message)
 {
 	lock_queue();
 
@@ -111,8 +106,7 @@ static inline void submit_message(char* text, bool should_free)
 	{
 		//Create a new node
 		MessageNode* new_node = malloc(sizeof(MessageNode));
-		new_node->message.text = text;
-		new_node->message.should_free = should_free;
+		new_node->message = message;
 		new_node->next = 0;
 
 		//add the message to the front of the queue
@@ -136,8 +130,7 @@ static inline void submit_message(char* text, bool should_free)
 	{
 		//No reason to hold lock while freeing
 		unlock_queue();
-
-		if(should_free) free(text);
+		es_free(&message);
 	}
 
 }
@@ -152,11 +145,11 @@ static inline void shutdown_queue()
 
 void* print_thread(void* arg)
 {
-	Message message;
+	String message;
 	while(get_next(&message))
 	{
-		printf("%s\n", message.text);
-		if(message.should_free) free(message.text);
+		printf("%.*s\n", (int)ES_SIZESTRCNST(&message));
+		es_free(&message);
 	}
 	return 0;
 }
@@ -195,22 +188,15 @@ void end_print_thread()
 	pthread_cond_destroy(&queue.print_signal);
 }
 
-void submit_print(char* message)
+void submit_print(String message)
 {
-	submit_message(message, false);
+	submit_message(message);
 }
 
-void submit_print_mve(char* message)
+void submit_debug(String message)
 {
-	submit_message(message, true);
-}
-
-void submit_debug(char* message)
-{
-	if(DEBUG_PRINT) submit_print(message);
-}
-
-void submit_debug_mve(char* message)
-{
-	if(DEBUG_PRINT) submit_print_mve(message);
+	if(DEBUG_PRINT)
+		submit_print(message);
+	else
+		es_free(&message);
 }

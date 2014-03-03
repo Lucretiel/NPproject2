@@ -3,6 +3,8 @@
  *
  *  Created on: Feb 18, 2014
  *      Author: nathan
+ *
+ *  Implementation of HTTP request/response clear methods. These are destructors
  */
 
 #include <stdlib.h>

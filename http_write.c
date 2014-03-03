@@ -5,14 +5,14 @@
  *      Author: nathan
  */
 
-#include <stdlib.h>
+#include <stdio.h>
 #include "http.h"
 
 #include "config.h"
 
 //TODO: io error checking
 
-#define WRITE(...) dprintf(connection, __VA_ARGS__)
+#define WRITE(...) { if(dprintf(connection, __VA_ARGS__) < 0) return 1; }
 
 static inline int write_request_line(HTTP_ReqLine* line, int connection)
 {

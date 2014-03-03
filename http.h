@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <string.h>
 #include "EasyString/easy_string.h"
 
 /*
@@ -134,7 +135,10 @@ void add_header(HTTP_Message* message, StringRef name, StringRef value);
 void set_response(HTTP_Message* message, int code);
 
 //Get an appropriate phrase for a given response code
-const char* response_phrase(int code)
+StringRef response_phrase(int code);
+
+//Set the body and content-length header
+void set_body(HTTP_Message* message, String body);
 
 //Call this ONCE PER PROGRAM. Before threads.
 void init_http();

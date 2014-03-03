@@ -44,8 +44,9 @@ void add_header(HTTP_Message* message, StringRef name, StringRef value)
 
 StringRef response_phrase(int code)
 {
-#define CASE(CODE, STR) case CODE: return es_temp(STR);
-#define DEFAULT(STR) default: return STR;
+	//Explicit strlen for compile-time optimizations
+	#define CASE(CODE, STR) case CODE: return es_temp(STR);
+	#define DEFAULT(STR) default: return es_temp(STR);
 	switch(code)
 	{
 		CASE(100, "Continue")
@@ -96,4 +97,13 @@ void set_response(HTTP_Message* message, int code)
 {
 	message->response.status = code;
 	message->response.phrase = es_copy(response_phrase(code));
+}
+
+void set_body(HTTP_Message* message, String body)
+{
+	char length_str[80];
+	int size = snprintf(length_str, 80, "%zu", body.size);
+
+	add_header(message, es_temp("Content-Length"), es_tempn(length_str, size));
+	message->body = body;
 }

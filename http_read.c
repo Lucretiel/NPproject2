@@ -34,7 +34,7 @@ inline static int regex_match(const regex_t* regex, RegexMatches matches,
 	{
 		for(int i = 0; i < num_matches; ++i)
 			if(local[i].rm_so == -1)
-				matches[i] = es_null_ref;
+				matches[i] = es_temp(0);
 			else
 				matches[i] = es_slice(str, local[i].rm_so,
 					local[i].rm_eo - local[i].rm_so);
@@ -411,7 +411,7 @@ static inline int parse_headers(HTTP_Message* message, StringRef header_text)
 int read_headers(HTTP_Message* message, int connection)
 {
 	String headers = es_empty_string;
-	#define RETURN(CODE) { es_free(&headers); return (CODE); }
+	#define RETURN(CODE) { es_free(headers); return (CODE); }
 
 	//Read all the headers, up to a blank line or MAX_HEADER_SIZE
 	int done = 0;
@@ -423,14 +423,13 @@ int read_headers(HTTP_Message* message, int connection)
 		//If the last character isn't a newline, something went wrong
 		if(es_cstrc(&line)[line.size-1] != '\n')
 		{
-			es_free(&headers);
 			es_free(&line);
 
 			//If we hit the max
-			if(line.size >= MAX_HEADER_LINE_SIZE) return too_long;
+			if(line.size >= MAX_HEADER_LINE_SIZE) RETURN(too_long)
 
 			//Otherwise, assume a connection error
-			else return connection_error;
+			else RETURN(connection_error)
 		}
 
 		//Append this line
@@ -451,7 +450,7 @@ int read_headers(HTTP_Message* message, int connection)
 	//Parse headers
 	int error = parse_headers(message, es_ref(&headers));
 
-	RETURN(error);
+	RETURN(error)
 
 	#undef RETURN
 }
@@ -459,7 +458,10 @@ int read_headers(HTTP_Message* message, int connection)
 static inline int read_fixed_body(HTTP_Message* message, int connection, size_t size)
 {
 	//Real simple fixed size read
-	if(size)
+	if(size > MAX_BODY_SIZE)
+		return too_long;
+
+	else if(size)
 	{
 		char* buffer = malloc(size);
 		if(tcp_read_fixed(connection, buffer, size))
@@ -511,7 +513,7 @@ static inline int read_chunked_body(HTTP_Message* message, int connection)
 			RETURN1(malformed_line)
 
 		//Get the chunk length. Remember- it's hex, not decimal
-		chunk_length = strtoul(es_ref(&chunk_head).begin, 0, 16);
+		chunk_length = strtoul(REGEX_PART(chunk_match_size).begin, 0, 16);
 
 		//self explanatory
 		if(chunk_length > MAX_CHUNK_SIZE) RETURN1(too_long)
@@ -567,9 +569,6 @@ int read_body(HTTP_Message* message, int connection)
 		unsigned long content_length = 0;
 		if(es_toul(&content_length, es_ref(&header->value)))
 			return bad_content_length;
-
-		if(content_length > MAX_BODY_SIZE)
-			return too_long;
 
 		return read_fixed_body(message, connection, content_length);
 	}

@@ -9,10 +9,11 @@
 
 #pragma once
 
+#include <string.h>
+#include "EasyString/easy_string.h"
+
 int begin_print_thread();
 void end_print_thread();
 
-void submit_print(char* message);
-void submit_print_mve(char* message);
-void submit_debug(char* message);
-void submit_debug_mve(char* message);
+void submit_print(String message);
+void submit_debug(String message);
