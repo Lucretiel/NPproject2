@@ -1,11 +1,14 @@
 /*
- * http_common.c
+ * http_read.c
  *
  *  Created on: Feb 11, 2014
  *      Author: nathan
+ *
+ *  Read and parse HTTP messages
  */
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <regex.h>
 #include <sys/types.h>
@@ -192,8 +195,10 @@ static regex_t chunk_regex; //matches the chunk header line
 	regcomp((COMPONENT), CONTENT, REG_ICASE | REG_EXTENDED)
 
 //Compile regular expressions
-void init_http()
+__attribute__((constructor))
+void init_http_regex()
 {
+	if(DEBUG_PRINT) puts("Initializing HTTP regex");
 	REGEX_COMPILE(&request_regex, REQUEST_REGEX_STR);
 	REGEX_COMPILE(&response_regex, RESPONSE_REGEX_STR);
 	REGEX_COMPILE(&header_regex, HEADER_REGEX_STR);
@@ -201,8 +206,10 @@ void init_http()
 }
 
 //Uncompile regular expressions
-void deinit_http()
+__attribute__((destructor))
+void deinit_http_regex()
 {
+	if(DEBUG_PRINT) puts("Clearing HTTP regex");
 	regfree(&request_regex);
 	regfree(&response_regex);
 	regfree(&header_regex);
@@ -356,7 +363,7 @@ int read_response_line(HTTP_Message* message, int connection)
 		if(es_compare(es_temp("1.1"), version) && es_compare(es_temp("1.0"), version))
 			RETURN(bad_version)
 		else
-			message->request.http_version = version.begin[2];
+			message->response.http_version = version.begin[2];
 	}
 
 	//Get status code

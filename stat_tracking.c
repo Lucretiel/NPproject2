@@ -7,7 +7,9 @@
 
 #include <pthread.h>
 #include <string.h>
+#include <stdio.h>
 
+#include "config.h"
 #include "stat_tracking.h"
 #include "print_thread.h"
 
@@ -28,10 +30,20 @@ static pthread_mutex_t stat_mutex;
 	THING \
 	pthread_mutex_unlock(&stat_mutex);
 
+__attribute__((constructor))
 void init_stat_tracking()
 {
+	if(DEBUG_PRINT) puts("Initializing stat tracking");
 	memset(&stats, 0, sizeof(stats));
 	pthread_mutex_init(&stat_mutex, 0);
+}
+
+__attribute__((destructor))
+void deinit_stat_tracking()
+{
+	if(DEBUG_PRINT) puts("Deinitializng stat tracking");
+	pthread_mutex_destroy(&stat_mutex);
+	es_free(&stats.filters);
 }
 
 void stat_add_success()

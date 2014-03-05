@@ -32,3 +32,6 @@ const static int MAX_NUM_HEADERS = 1024;
 
 //If true, debug prints will be sent
 const static int DEBUG_PRINT = 1;
+
+//If true, thread IDs will be added to print output
+const static int PRINT_TID = 1;

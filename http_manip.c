@@ -9,6 +9,7 @@
 
 #include "http.h"
 
+
 #define CASE(CODE, STR) case CODE: return es_temp(STR);
 #define DEFAULT(STR) default: return es_temp(STR);
 
@@ -52,7 +53,7 @@ void add_header(HTTP_Message* message, StringRef name, StringRef value)
 	header->name = es_copy(name);
 	header->value = es_copy(value);
 	header->next = message->headers;
-	message->headers = header->next;
+	message->headers = header;
 }
 
 StringRef response_phrase(int code)

@@ -92,7 +92,7 @@ static inline void handle_error(int fd, int code, StringRef text)
 }
 
 //Global, thread-local thread data
-static __thread struct
+typedef struct
 {
 	struct sockaddr_in client_addr;
 	int client_fd;
@@ -102,135 +102,155 @@ static __thread struct
 
 	HTTP_Message request;
 	HTTP_Message response;
-} thread_data;
+} ThreadData;
 
-static inline void init_thread_data(void* ptr)
+static inline void init_thread_data(ThreadData* thread_data, void* ptr)
 {
 	HTTP_Data* data = ((HTTP_Data*)(ptr));
-	thread_data.client_addr = data->connection_sockaddr;
-	thread_data.client_fd = data->connection_fd;
-	thread_data.server_fd = -1;
-	thread_data.state = cs_unknown;
-	thread_data.request = thread_data.response = empty_message;
+	thread_data->client_addr = data->connection_sockaddr;
+	thread_data->client_fd = data->connection_fd;
+	thread_data->server_fd = -1;
+	thread_data->state = cs_unknown;
+	thread_data->request = thread_data->response = empty_message;
 	free(ptr);
 }
 
 static void cleanup_thread_data(void* td)
 {
-	if(thread_data.client_fd >= 0) close(thread_data.client_fd);
-	if(thread_data.server_fd >= 0) close(thread_data.server_fd);
+	ThreadData* thread_data = td;
+	if(thread_data->client_fd >= 0) close(thread_data->client_fd);
+	if(thread_data->server_fd >= 0) close(thread_data->server_fd);
 
-	clear_request(&thread_data.request);
-	clear_response(&thread_data.response);
+	clear_request(&thread_data->request);
+	clear_response(&thread_data->response);
 }
 
-static inline String get_log_string()
+static inline String get_log_string(ThreadData* thread_data)
 {
 	//Get the Client IP
 	char ip_text[INET_ADDRSTRLEN];
-	inet_ntop(AF_INET, &thread_data.client_addr.sin_addr, ip_text, INET_ADDRSTRLEN);
+	inet_ntop(AF_INET, &thread_data->client_addr.sin_addr, ip_text, INET_ADDRSTRLEN);
 
 	//Get the method
-	StringRef method_text = method_name(thread_data.request.request.method);
+	StringRef method_text = method_name(thread_data->request.request.method);
 
 	//Attach the domain, method, and destination to the log
 	return es_printf("%.*s: %.*s http://%.*s/%.*s",
 		INET_ADDRSTRLEN, ip_text,
 		ES_STRREFPRINT(&method_text),
-		ES_STRINGPRINT(&thread_data.request.request.domain),
-		ES_STRINGPRINT(&thread_data.request.request.domain));
+		ES_STRINGPRINT(&thread_data->request.request.domain),
+		ES_STRINGPRINT(&thread_data->request.request.path));
 }
 
-static inline void error(const char* error) __attribute__ ((noreturn));
-static inline void error(const char* error)
+//Pass a 0 code to prevent response
+static inline void error(ThreadData* thread_data, int code, const char* msg)
 {
 	stat_add_error();
-	submit_debug(es_copy(es_temp(error)));
+	String log_string_base = get_log_string(thread_data);
+	String log_string = es_printf("%.*s [ERROR] %s",
+		ES_STRINGPRINT(&log_string_base), msg);
+	es_free(&log_string_base);
+	submit_print(log_string);
+	if(code > 0) handle_error(thread_data->client_fd, code, es_temp(msg));
 	pthread_exit(0);
 }
 
-static inline void respond_error(int code, const char* error) __attribute__ ((noreturn));
-static inline void respond_error(int code, const char* error)
-{
-	stat_add_error();
-	submit_debug(es_copy(es_temp(error)));
-	handle_error(thread_data.client_fd, code, es_temp(error));
-	pthread_exit(0);
-}
+#define ERROR(MSG) error(&thread_data, 0, MSG)
+#define RESPOND_ERROR(CODE, MSG) error(&thread_data, CODE, MSG)
 
-static inline void success()
+static inline void success(ThreadData* thread_data)
 {
 	stat_add_success();
-	submit_print(get_log_string());
+	submit_print(get_log_string(thread_data));
 }
 
-static inline void filter() __attribute__ ((noreturn));
-static inline void filter()
+static inline void filter(ThreadData* thread_data)
 {
 	stat_add_filtered();
-	String log_string = get_log_string();
+	String log_string = get_log_string(thread_data);
 	es_append(&log_string, es_temp(" [FILTERED]"));
 	submit_print(log_string);
-	handle_error(thread_data.client_fd, 403, es_temp("Blocked by Proxy Filter"));
+	handle_error(thread_data->client_fd, 403, es_temp("Blocked by Proxy Filter"));
 	pthread_exit(0);
 }
 
-static inline void debug_msg(const char* msg)
+void* http_worker_thread(void* ptr)
 {
-	submit_debug(es_copy(es_temp(msg)));
-}
+	ThreadData thread_data;
+	init_thread_data(&thread_data, ptr);
 
-
-void* http_thread(void* ptr)
-{
-	init_thread_data(ptr);
-
-	pthread_cleanup_push(&cleanup_thread_data, 0);
+	pthread_cleanup_push(&cleanup_thread_data, &thread_data);
 
 	while(thread_data.state != cs_close)
 	{
-		debug_msg("Reading request");
+		submit_debug_c("Reading request");
 
 		///////////////////////////////////////////////////////////////////////
 		// READ REQUEST
 		///////////////////////////////////////////////////////////////////////
-		debug_msg("Reading request line");
+		submit_debug_c("Reading request line");
 
 		switch(read_request_line(&thread_data.request, thread_data.client_fd))
 		{
-		case connection_error: error("Error: Connection Error");
-		case too_long: respond_error(414, "Error: Request line too long");
-		case malformed_line: respond_error(400, "Error: Malformed request line");
-		case bad_method: respond_error(405, "Error: bad method");
-		case bad_version: respond_error(505, "Error: bad HTTP version");
+		case connection_error:
+			ERROR("Error: Connection Error");
+			break;
+		case too_long:
+			RESPOND_ERROR(414, "Error: Request line too long");
+			break;
+		case malformed_line:
+			RESPOND_ERROR(400, "Error: Malformed request line");
+			break;
+		case bad_method:
+			RESPOND_ERROR(405, "Error: bad method");
+			break;
+		case bad_version:
+			RESPOND_ERROR(505, "Error: bad HTTP version");
+			break;
 		}
 
-		debug_msg("Reading headers");
+		submit_debug_c("Reading headers");
 
 		switch(read_headers(&thread_data.request, thread_data.client_fd))
 		{
-		case connection_error: error("Error: Connection Error");
-		case too_long: respond_error(413, "Error: Too much header data sent");
-		case malformed_line: respond_error(400, "Error: Malformed headers");
-		case too_many_headers: respond_error(413, "Error: Too many headers sent");
+		case connection_error:
+			ERROR("Error: Connection Error");
+			break;
+		case too_long:
+			RESPOND_ERROR(413, "Error: Too much header data sent");
+			break;
+		case malformed_line:
+			RESPOND_ERROR(400, "Error: Malformed headers");
+			break;
+		case too_many_headers:
+			RESPOND_ERROR(413, "Error: Too many headers sent");
+			break;
 		}
 
-		debug_msg("Reading body");
+		submit_debug_c("Reading body");
 
 		switch(read_body(&thread_data.request, thread_data.client_fd))
 		{
-		case connection_error: error("Error: Connection Error");
-		case bad_content_length: respond_error(400, "Error: Content-Length malformed");
+		case connection_error:
+			ERROR("Error: Connection Error");
+			break;
+		case bad_content_length:
+			RESPOND_ERROR(400, "Error: Content-Length malformed");
+			break;
 		//TODO: separate too_long errors for chunk header, chunk, body, etc
-		case too_long: respond_error(413, "Error: Body too long");
-		case malformed_line: respond_error(400, "Error: Chunk size line malformed");
+		case too_long:
+			RESPOND_ERROR(413, "Error: Body too long");
+			break;
+		case malformed_line:
+			RESPOND_ERROR(400, "Error: Chunk size line malformed");
+			break;
 		}
 
 		///////////////////////////////////////////////////////////////////////
 		// VALDIDATE REQUEST
 		///////////////////////////////////////////////////////////////////////
 
-		debug_msg("Checking HTTP");
+		submit_debug_c("Checking HTTP");
 
 		//Force shutdown of persistent connections
 		//Add connection:close header for http/1.1
@@ -242,7 +262,7 @@ void* http_thread(void* ptr)
 
 		//Check filters
 		if(filter_match_any(es_ref(&thread_data.request.request.domain)))
-			filter();
+			filter(&thread_data);
 
 		//Check host
 		//Only need to check host in HTTP/1.1
@@ -250,7 +270,7 @@ void* http_thread(void* ptr)
 		{
 			//Just check for the precence of host and assume correctness
 			if(!find_header(&thread_data.request, es_temp("Host")))
-				respond_error(400, "Error: missing Host: header");
+				RESPOND_ERROR(400, "Error: missing Host: header");
 		}
 
 		//Check for content-length in POST
@@ -269,44 +289,44 @@ void* http_thread(void* ptr)
 		// SEND REQUEST
 		///////////////////////////////////////////////////////////////////////
 
-		debug_msg("Forwarding request");
+		submit_debug_c("Forwarding request");
 
 		//This if is here for hypothetical persistant connections
 		if(thread_data.server_fd < 0)
 		{
-			debug_msg("Opening initial connection to server");
+			submit_debug_c("Opening initial connection to server");
 
 			thread_data.server_fd = socket(PF_INET, SOCK_STREAM, 0);
 			if(thread_data.server_fd < 0)
-				respond_error(500, "Error: Unable to open socket");
+				RESPOND_ERROR(500, "Error: Unable to open socket");
 
-			debug_msg("Looking up host");
+			submit_debug_c("Looking up host");
 
 			struct addrinfo* host_info;
 			if(getaddrinfo(es_cstrc(&thread_data.request.request.domain),
 					"http", 0, &host_info))
-				respond_error(500, "Error: error looking up host");
+				RESPOND_ERROR(500, "Error: error looking up host");
 
-			debug_msg("Connecting to host");
+			submit_debug_c("Connecting to host");
 
 			if(connect(thread_data.server_fd, host_info->ai_addr, sizeof(*(host_info->ai_addr))) < 0)
 			{
 				freeaddrinfo(host_info);
-				respond_error(500, "Error: unable to connect to host");
+				RESPOND_ERROR(500, "Error: unable to connect to host");
 			}
 
 			freeaddrinfo(host_info);
 		}
 
-		debug_msg("Writing request");
+		submit_debug_c("Writing request");
 
 		if(write_request(&thread_data.request, thread_data.server_fd))
-			respond_error(502, "Error: error writing request to server");
+			RESPOND_ERROR(502, "Error: error writing request to server");
 
 		///////////////////////////////////////////////////////////////////////
 		// GET RESPONSE
 		///////////////////////////////////////////////////////////////////////
-		debug_msg("Reading response");
+		submit_debug_c("Reading response");
 
 		/*
 		 * TODO: better error messages back to the client. This isn't really
@@ -314,20 +334,20 @@ void* http_thread(void* ptr)
 		 * invalid HTTP response, not valid HTTP responses that are just errors.
 		 */
 		if(
-				read_request_line(&thread_data.response, thread_data.server_fd) ||
+				read_response_line(&thread_data.response, thread_data.server_fd) ||
 				read_headers(&thread_data.response, thread_data.server_fd) ||
 				read_body(&thread_data.response, thread_data.server_fd))
-			respond_error(502, "Error: Connection error reading response");
+			RESPOND_ERROR(502, "Error: error reading response");
 
 		///////////////////////////////////////////////////////////////////////
 		// SEND RESPONSE
 		///////////////////////////////////////////////////////////////////////
-		debug_msg("Writing response");
+		submit_debug_c("Writing response");
 		if(write_response(&thread_data.response, thread_data.client_fd))
-			error("Error writing response");
+			ERROR("Error writing response");
 
 		//NO ERRORS! WE SURVIVED!
-		success();
+		success(&thread_data);
 
 		clear_request(&thread_data.request);
 		clear_response(&thread_data.response);

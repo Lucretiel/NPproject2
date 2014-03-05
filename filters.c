@@ -6,8 +6,10 @@
  */
 
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "filters.h"
+#include "config.h"
 
 typedef struct filter_node
 {
@@ -17,11 +19,6 @@ typedef struct filter_node
 
 static FilterNode* filter_front;
 
-void init_filters()
-{
-	filter_front = 0;
-}
-
 void filter_add(String filter)
 {
 	FilterNode* node = malloc(sizeof(FilterNode));
@@ -29,6 +26,19 @@ void filter_add(String filter)
 	node->filter = es_tolower(es_ref(&filter));
 	es_free(&filter);
 	filter_front = node;
+}
+
+__attribute__((destructor))
+void deinit_filters()
+{
+	if(DEBUG_PRINT) puts("Clearing filters");
+	while(filter_front)
+	{
+		FilterNode* node = filter_front;
+		filter_front = filter_front->next;
+		es_free(&node->filter);
+		free(node);
+	}
 }
 
 static inline bool filter_match(StringRef filter, StringRef domain)
@@ -74,15 +84,3 @@ bool filter_match_any(StringRef domain)
 	es_free(&domain_lower);
 	return false;
 }
-
-void deinit_filters()
-{
-	while(filter_front)
-	{
-		FilterNode* node = filter_front;
-		filter_front = filter_front->next;
-		es_free(&node->filter);
-		free(node);
-	}
-}
-

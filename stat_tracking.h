@@ -9,8 +9,6 @@
 
 #include "EasyString/easy_string.h"
 
-void init_stat_tracking();
-
 void stat_add_success();
 void stat_add_filtered();
 void stat_add_error();

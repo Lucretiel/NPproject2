@@ -8,6 +8,7 @@
 #pragma once
 
 #include <sys/types.h>
+#include <netinet/in.h>
 
 typedef struct
 {
@@ -16,4 +17,4 @@ typedef struct
 } HTTP_Data;
 
 //Send in a pointer to a malloc'd HTTP_Data
-void* http_thread(void* ptr);
+void* http_worker_thread(void* ptr);

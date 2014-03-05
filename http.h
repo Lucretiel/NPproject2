@@ -145,12 +145,3 @@ void set_response(HTTP_Message* message, int code);
 
 //Set the body and content-length header
 void set_body(HTTP_Message* message, String body);
-
-//Call this ONCE PER PROGRAM. Before threads.
-void init_http();
-
-/*
- * Call this at the end. Optional, because the memory used by init_http is
- * fixed size per run, so it isn't strictly a leak if it isn't cleared.
- */
-void deinit_http();

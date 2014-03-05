@@ -9,7 +9,7 @@
 
 #pragma once
 
-void launch_http_manager();
-void stop_http_manager();
+#include <netinet/in.h>
 
-void handle_connection(int fd);
+int manager_status();
+int handle_connection(int connection_fd, struct sockaddr_in* connection_addr);

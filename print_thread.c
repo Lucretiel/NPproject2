@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <sys/types.h>
 
 #include "config.h"
 #include "print_thread.h"
@@ -104,6 +105,16 @@ static inline void submit_message(String message)
 	//If the queue isn't shutdown
 	if(!queue.shutdown)
 	{
+		if(PRINT_TID)
+		{
+			//ASSUMES pthread_t IS AN UNSIGNED LONG
+			pthread_t thread_id = pthread_self();
+			String updated_message = es_printf("[thread: %ul] %.*s",
+					thread_id,
+					ES_STRINGPRINT(&message));
+			es_free(&message);
+			message = updated_message;
+		}
 		//Create a new node
 		MessageNode* new_node = malloc(sizeof(MessageNode));
 		new_node->message = message;
@@ -154,12 +165,12 @@ void* print_thread(void* arg)
 	return 0;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// PUBLIC INTERFACE
-///////////////////////////////////////////////////////////////////////////////
+int _print_thread_status = -1;
 
-int begin_print_thread()
+__attribute__((constructor))
+void begin_print_thread()
 {
+	if(DEBUG_PRINT) puts("Launching print thread");
 	//This is implicit for static variables, but better to be explicit
 	queue.front = queue.back = 0;
 	queue.shutdown = 0;
@@ -169,11 +180,13 @@ int begin_print_thread()
 	pthread_cond_init(&queue.print_signal, 0);
 
 	//Launch thread
-	return pthread_create(&queue.printer, 0, &print_thread, 0);
+	_print_thread_status = pthread_create(&queue.printer, 0, &print_thread, 0);
 }
 
+__attribute__((destructor))
 void end_print_thread()
 {
+	if(DEBUG_PRINT) puts("Stopping print thread");
 	/*
 	 * Shutdown the queue. No more messages can be submitted. Remaining
 	 * messages will be printed.
@@ -181,12 +194,16 @@ void end_print_thread()
 	shutdown_queue();
 
 	//Wait for the thread
-	pthread_join(queue.printer, 0);
+	if(_print_thread_status == 0) pthread_join(queue.printer, 0);
 
 	//Clear sync primitives
 	pthread_mutex_destroy(&queue.mutex);
 	pthread_cond_destroy(&queue.print_signal);
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// PUBLIC INTERFACE
+///////////////////////////////////////////////////////////////////////////////
 
 void submit_print(String message)
 {
@@ -196,7 +213,12 @@ void submit_print(String message)
 void submit_debug(String message)
 {
 	if(DEBUG_PRINT)
-		submit_print(message);
+		submit_message(message);
 	else
 		es_free(&message);
+}
+
+int print_thread_status()
+{
+	return _print_thread_status;
 }
