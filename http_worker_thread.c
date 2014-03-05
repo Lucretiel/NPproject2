@@ -142,11 +142,19 @@ static inline String get_log_string(ThreadData* thread_data)
 		ES_STRINGPRINT(&thread_data->request.request.path));
 }
 
+static inline String get_just_client(ThreadData* thread_data)
+{
+	char ip_text[INET_ADDRSTRLEN];
+	inet_ntop(AF_INET, &thread_data->client_addr.sin_addr, ip_text, INET_ADDRSTRLEN);
+
+	return es_copy(es_tempn(ip_text, INET_ADDRSTRLEN));
+}
+
 //Pass a 0 code to prevent response
 static inline void error(ThreadData* thread_data, int code, const char* msg)
 {
 	stat_add_error();
-	String log_string_base = get_log_string(thread_data);
+	String log_string_base = get_just_client(thread_data);
 	String log_string = es_printf("%.*s [ERROR] %s",
 		ES_STRINGPRINT(&log_string_base), msg);
 	es_free(&log_string_base);

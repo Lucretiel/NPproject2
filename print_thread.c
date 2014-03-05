@@ -109,7 +109,7 @@ static inline void submit_message(String message)
 		{
 			//ASSUMES pthread_t IS AN UNSIGNED LONG
 			pthread_t thread_id = pthread_self();
-			String updated_message = es_printf("[thread: %ul] %.*s",
+			String updated_message = es_printf("[thread: %u] %.*s",
 					thread_id,
 					ES_STRINGPRINT(&message));
 			es_free(&message);

@@ -11,6 +11,7 @@
 
 #include "filters.h"
 #include "server_listener.h"
+#include "stat_tracking.h"
 
 int main(int argc, char **argv)
 {
@@ -29,7 +30,10 @@ int main(int argc, char **argv)
 	}
 
 	for(unsigned i = 2; i < argc; ++i)
+	{
 		filter_add(es_copy(es_temp(argv[i])));
+		stat_filter(es_temp(argv[i]));
+	}
 
 	return serve_forever(port_l);
 }
