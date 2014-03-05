@@ -52,8 +52,8 @@ Compile notes
 why this is needed, as `getaddrinfo` is standard POSIX, but it's needed.
 - Compile with `-pthread`
 - Make sure to compile the `*.c` files in the subdirectories.
-- I've included the auto-generated makefiles produced by my IDE. They work fine
-from the command line in Ubuntu 12.04
+- I've included the auto-generated makefiles produced by my IDE in the `Debug`
+and `Release` directories. They work fine from the command line in Ubuntu 12.04
 
 Implementation notes
 --------------------
