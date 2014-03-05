@@ -134,11 +134,6 @@ inline static int regex_match(const regex_t* regex, RegexMatches matches,
 				AT_LEAST_ONE(HEADER_VALUE_CHARACTER)))) \
 			CR_LF)
 
-//#define HEADER_REGEX_STR FRONT_ANCHOR( \
-//	SUBMATCH(AT_LEAST_ONE(HEADER_NAME_CHARACTER)) \
-//	":" MANY(LWS) \
-//	SUBMATCH(AT_LEAST_ONE(HEADER_VALUE_CHARACTER)) CR_LF)
-
 #define CHUNK_REGEX_STR \
 	FULL_ANCHOR( \
 		SUBMATCH(AT_LEAST_ONE(CLASS("[:xdigit:]"))) /* SIZE FIELD: 1 */ \

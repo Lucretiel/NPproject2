@@ -20,6 +20,7 @@ StringRef method_name(MethodType method)
 	CASE(get, "GET")
 	CASE(head, "HEAD")
 	CASE(post, "POST")
+	DEFAULT(0)
 	}
 }
 

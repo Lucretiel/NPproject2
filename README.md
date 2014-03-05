@@ -46,14 +46,46 @@ semantics, and the StringRef type, which stores a char* and a length. The
 library provides numerous utilities for manipulating strings, including copying,
 moving, slicing, appending, and comparison.
 
+Compile notes
+-------------
+- Please compile with `-std=gnu99` for the `getaddrinfo` function. I don't know
+why this is needed, as `getaddrinfo` is standard POSIX, but it's needed.
+- Compile with `-pthread`
+- Make sure to compile the `*.c` files in the subdirectories.
+- I've included the auto-generated makefiles produced by my IDE. They work fine
+from the command line in Ubuntu 12.04
+
 Implementation notes
 --------------------
-- Signal handling hasn't been implemented yet.
+
 - Persistent HTTP support has been half-implemented. For now, though, it closes
-the connections after a single connection
-- Chunked encoding is implemented
+the connections after a single connection.
 - Large parts of this were coded in Monster-Fueled all-nighters, so I apologize
 if any of the commenting contains profanity or is incomprehensible. I did my
 best to edit it, but I may have missed something.
 - The GitHub repo for this project is available at
 https://github.com/Lucretiel/NPproject2
+- Make sure to compile all of the .c files in the subdirectories, as well
+- I'm 90% sure the Malformed Request line errors you see every so often are
+HTTPS requests. Malformed Request Line basically means that the regex I use to
+match the request line failed to match. Right now there's no easy way to test
+this, because I don't preserve the original client request bytes anywhere.
+Attempting a normal HTTPS request results in the same Malformed Request Line
+error.
+- Everyone spent the whole last 2 weeks telling me I was putting way too much
+work into this, so I started cutting corners. This is why you get that
+particular usage message.
+- This code should be portable to any unix-style OS. It's all standard C, but
+I used a few gcc `__attribute__` extensions. These extensions are supported by
+clang 3.3+ and gcc 4.0+ (standard Ubuntu 12.04 uses gcc 4.6).
+
+Test Notes
+----------
+
+- My most heavily tested sites were `www.example.com`, `www.reddit.com`,
+and `wikipedia.org`. Testing was performed in firefox on Ubuntu 12.04 in a
+VMware Fusion Virtual Machine. HTTPS doesn't work, but otherwise browsing was
+very consistently normal, if a little slower. reddit in particular was a very
+smooth experience-all thumbnails and other things load and work fine. Wikipedia
+had more trouble, as I don't think that CSS was being delivered properly, but
+the text itself loaded and browsed fine.
