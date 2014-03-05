@@ -8,24 +8,30 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <pthread.h>
+#include <sys/types.h>
 
+#include "config.h"
 #include "print_thread.h"
 
-typedef struct message
+typedef struct message_node
 {
-	struct message* next;
-	char* text;
-} Message;
+	struct message_node* next;
+	String message;
+} MessageNode;
 
+//ALL HAIL THE GLOBAL MESSAGE QUEUE
 //Push to the front, pop off the back
 static struct {
-	Message* front;
-	Message* back;
+	MessageNode* front;
+	MessageNode* back;
+	bool shutdown;
 
 	pthread_mutex_t mutex;
 	pthread_cond_t print_signal; //When the printer is waiting for a message
 
+	//ALL HAIL THE GLOBAL PRINT THREAD
 	pthread_t printer; //The actual printer thread
 } queue;
 
@@ -50,93 +56,137 @@ static inline void signal_printer()
 }
 
 //Pop the next message off the queue.
-char* get_next()
+static inline bool get_next(String* message)
 {
-	char* result = 0;
+	//Set to true if a message is retrieved. False means shutdown.
+	bool message_flag = false;
+
 	lock_queue();
+
 	//while there are no new messages and messages are incoming
-	while((!queue.back->next) && (queue.front))
+	while(!queue.back && !queue.shutdown)
 		printer_wait();
 
 	//Either there is a message or we were shutdown (or both)
 
 	//If message
-	if(queue.back->next)
+	if(queue.back)
 	{
-		Message* next_msg = queue.back->next;
-		free(queue.back);
-		queue.back = next_msg;
-		result = next_msg->text;
-		next_msg->text = 0;
-		unlock_queue();
+		//Get the message
+		MessageNode* node = queue.back;
+
+		//Update the back ptr
+		queue.back = node->next;
+
+		//If nessesary, clear the front ptr
+		if(queue.front == node)
+			queue.front = 0;
+
+		//Get the message text
+		*message = node->message;
+
+		//Free message
+		free(node);
+
+		//Set the message flag
+		message_flag = 1;
 	}
 
 	unlock_queue();
-	return result;
+
+	return message_flag;
 }
 
 //Add a message to the queue
-static inline void submit_message(const char* message)
+static inline void submit_message(String message)
 {
-	Message* new_message = calloc(1, sizeof(Message));
-	size_t message_length = strlen(message);
-	new_message->text = calloc(message_length + 1, sizeof(char));
-	memcpy(new_message->text, message, message_length);
-
 	lock_queue();
 
-	if(queue.front)
+	//If the queue isn't shutdown
+	if(!queue.shutdown)
 	{
-		queue.front->next = new_message;
-		queue.front = new_message;
+		if(PRINT_TID)
+		{
+			//ASSUMES pthread_t IS AN UNSIGNED LONG
+			pthread_t thread_id = pthread_self();
+			String updated_message = es_printf("[thread: %ul] %.*s",
+					thread_id,
+					ES_STRINGPRINT(&message));
+			es_free(&message);
+			message = updated_message;
+		}
+		//Create a new node
+		MessageNode* new_node = malloc(sizeof(MessageNode));
+		new_node->message = message;
+		new_node->next = 0;
+
+		//add the message to the front of the queue
+		if(queue.front)
+			queue.front->next = new_node;
+
+		//set the message to the back of the queue, if necessary
+		if(!queue.back)
+			queue.back = new_node;
+
+		//set the message to the front of the queue
+		queue.front = new_node;
+
+		//Signal the printer
 		signal_printer();
+
+		//Unlock;
 		unlock_queue();
 	}
 	else
 	{
+		//No reason to hold lock while freeing
 		unlock_queue();
-		free(new_message->text);
-		free(new_message);
+		es_free(&message);
 	}
+
 }
 
 static inline void shutdown_queue()
 {
 	lock_queue();
-	queue.front = 0;
+	queue.shutdown = true;
 	signal_printer();
 	unlock_queue();
 }
 
 void* print_thread(void* arg)
 {
-	for(char* message = get_next(); message; message = get_next())
+	String message;
+	while(get_next(&message))
 	{
-		fputs(message, stdout);
-		free(message);
+		printf("%.*s\n", (int)ES_SIZESTRCNST(&message));
+		es_free(&message);
 	}
 	return 0;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// PUBLIC INTERFACE
-///////////////////////////////////////////////////////////////////////////////
+int _print_thread_status = -1;
 
-int begin_print_thread()
+__attribute__((constructor))
+void begin_print_thread()
 {
-	//Initialize message queues
-	queue.front = queue.back = calloc(1, sizeof(Message));
+	if(DEBUG_PRINT) puts("Launching print thread");
+	//This is implicit for static variables, but better to be explicit
+	queue.front = queue.back = 0;
+	queue.shutdown = 0;
 
 	//Initialize sync primitives
 	pthread_mutex_init(&queue.mutex, 0);
 	pthread_cond_init(&queue.print_signal, 0);
 
 	//Launch thread
-	return pthread_create(&queue.printer, 0, &print_thread, 0);
+	_print_thread_status = pthread_create(&queue.printer, 0, &print_thread, 0);
 }
 
+__attribute__((destructor))
 void end_print_thread()
 {
+	if(DEBUG_PRINT) puts("Stopping print thread");
 	/*
 	 * Shutdown the queue. No more messages can be submitted. Remaining
 	 * messages will be printed.
@@ -144,27 +194,31 @@ void end_print_thread()
 	shutdown_queue();
 
 	//Wait for the thread
-	pthread_join(queue.printer, 0);
-
-	//Wipe remaining messages
-	Message* message = queue.front;
-	while(message)
-	{
-		Message* to_clear = message;
-		message = message->next;
-		free(to_clear->text);
-		free(to_clear);
-	}
-	//Wipe queue
-	queue.front = 0;
-	queue.back = 0;
+	if(_print_thread_status == 0) pthread_join(queue.printer, 0);
 
 	//Clear sync primitives
 	pthread_mutex_destroy(&queue.mutex);
 	pthread_cond_destroy(&queue.print_signal);
 }
 
-void submit_print(const char* message)
+///////////////////////////////////////////////////////////////////////////////
+// PUBLIC INTERFACE
+///////////////////////////////////////////////////////////////////////////////
+
+void submit_print(String message)
 {
 	submit_message(message);
+}
+
+void submit_debug(String message)
+{
+	if(DEBUG_PRINT)
+		submit_message(message);
+	else
+		es_free(&message);
+}
+
+int print_thread_status()
+{
+	return _print_thread_status;
 }

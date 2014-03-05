@@ -7,10 +7,10 @@
  *  Utilities for manipulating HTTP data. Use fdopen to get a FILE* from an fd.
  */
 
-#ifndef HTTP_COMMON_H_
-#define HTTP_COMMON_H_
+#pragma once
 
-#include <stdio.h> //For FILE*
+#include <string.h>
+#include "EasyString/easy_string.h"
 
 /*
  * HTTP_ReqLine contains the data for a single request line. Members:
@@ -20,11 +20,14 @@
  *     No leading '/' character
  *   http_version: the character '0' or '1', depending on the http version
  */
+
+typedef enum { head, get, post } MethodType;
+
 typedef struct
 {
-	enum { head, get, post } method;
-	char* domain;
-	char* path;
+	String domain;
+	String path;
+	MethodType method;
 	char http_version; //0->1.0, 1->1.1
 } HTTP_ReqLine;
 
@@ -36,8 +39,8 @@ typedef struct
  */
 typedef struct
 {
+	String phrase;
 	int status;
-	char* phrase;
 	char http_version; //0->1.0, 1->1.1
 } HTTP_RespLine;
 
@@ -45,10 +48,11 @@ typedef struct
  * HTTP_Header contains the data for a single header. It has 2 null-terminated
  * strings for each of the name and value.
  */
-typedef struct
+typedef struct _http_header
 {
-	char* name;
-	char* value;
+	String name;
+	String value;
+	struct _http_header* next;
 } HTTP_Header;
 
 /*
@@ -78,12 +82,11 @@ typedef struct
 	};
 
 	HTTP_Header* headers;
-	int num_headers;
 
-	size_t body_length;
-	char* body;
+	String body;
 } HTTP_Message;
 
+static const HTTP_Message empty_message;
 
 /*
  * Must be called in order. Request/response -> headers -> body -> clear.
@@ -94,43 +97,51 @@ enum
 {
 	connection_error = 1, //EOF or other connection issue
 
-	malformed_line, //regex didn't match request/response line
-	malformed_header, //regex didn't match header line
+	malformed_line, //regex didn't match
 
 	bad_method, //method isn't GET, HEAD, or POST
 	bad_version, //HTTP version isn't 1.0 or 1.1
 
-	no_content_length, //content length header isn't present
 	bad_content_length, //content length header is invalid
 
-	line_too_long, //the request/response line is too long
-	header_too_long, //some header is too long
+	too_long, //Something was too long
 	too_many_headers //There are too many headers
 };
 
+//// READS
+//Read the first HTTP Line
+int read_request_line(HTTP_Message* message, int fd);
+int read_response_line(HTTP_Message* message, int fd);
 
-int read_request_line(HTTP_Message*, FILE*);
-int read_response_line(HTTP_Message*, FILE*);
-int read_headers(HTTP_Message*, FILE*);
-int read_body(HTTP_Message*, FILE*);
+//Read all headers
+int read_headers(HTTP_Message* message, int fd);
 
-int write_request(HTTP_Message*, FILE*);
-int write_response(HTTP_Message*, FILE*);
+//Read the body
+int read_body(HTTP_Message* message, int fd);
 
-void clear_request(HTTP_Message*);
-void clear_response(HTTP_Message*);
+//// WRITES
+int write_request(HTTP_Message* message, int fd);
+int write_response(HTTP_Message* message, int fd);
 
-HTTP_Header* find_header(HTTP_Message*, const char*);
+//// CLEARS
+void clear_request(HTTP_Message* message);
+void clear_response(HTTP_Message* message);
 
-//Call this ONCE PER PROGRAM. Before threads.
-void init_http();
+////MANIPULATORS
+//Find a header.
+const HTTP_Header* find_header(const HTTP_Message* message, StringRef header);
 
-/*
- * Call this at the end. Optional, because the memory used by init_http is
- * fixed size per run, so it isn't strictly a leak if it isn't cleared.
- */
-void deinit_http();
+//Get an appropriate phrase for a given response code
+StringRef response_phrase(int code);
 
+//Get the method name
+StringRef method_name(MethodType method);
 
+//Add a header
+void add_header(HTTP_Message* message, StringRef name, StringRef value);
 
-#endif /* HTTP_COMMON_H_ */
+//Set the response code, and an appropriate phrase
+void set_response(HTTP_Message* message, int code);
+
+//Set the body and content-length header
+void set_body(HTTP_Message* message, String body);

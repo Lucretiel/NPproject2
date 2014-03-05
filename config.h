@@ -9,13 +9,29 @@
 
 #pragma once
 
-const static size_t autobuf_initial_size = 256;
+//Max length of a request/response line
+const static unsigned long MAX_MSG_LINE_SIZE = 1024;
 
-const static size_t max_message_line_size = 1024 * 1024;
-const static size_t max_header_size = 1024 * 1024;
-const static size_t max_body_size = 1024 * 1024 * 1024;
+//Max size of any header line
+const static unsigned long MAX_HEADER_LINE_SIZE = 1024;
 
-const static int max_headers = 1024;
+//This is the max combined size of ALL headers
+const static unsigned long MAX_HEADER_SIZE = 1024 * 1024;
 
-//If true, each request and response will be flushed after being written
-const static int flush_http_messages = 1;
+//Max supported body size
+const static unsigned long MAX_BODY_SIZE = 1024 * 1024 * 1024;
+
+//Max size of a chunked encoding line
+const static unsigned long MAX_CHUNK_HEADER_SIZE = 1024;
+
+//Max size of a chunked encoding chunk
+const static unsigned long MAX_CHUNK_SIZE = 1024 * 1024;
+
+//Max number of headers
+const static int MAX_NUM_HEADERS = 1024;
+
+//If true, debug prints will be sent
+const static int DEBUG_PRINT = 1;
+
+//If true, thread IDs will be added to print output
+const static int PRINT_TID = 1;

@@ -3,38 +3,50 @@
  *
  *  Created on: Feb 18, 2014
  *      Author: nathan
+ *
+ *  Implementation of HTTP request/response clear methods. These are destructors
  */
 
 #include <stdlib.h>
 #include "http.h"
 
-#define CLEAR(PTR) free(PTR); PTR = 0
-
-static inline void clear_header(HTTP_Header* header)
+static inline void clear_headers(HTTP_Header* header)
 {
-	CLEAR(header->name);
-	CLEAR(header->value);
+	if(header)
+	{
+		es_free(&header->name);
+		es_free(&header->value);
+		clear_headers(header->next);
+		free(header);
+	}
 }
 
 static inline void clear_common(HTTP_Message* message)
 {
-	CLEAR(message->body);
-	for(int i = 0; i < message->num_headers; ++i)
-		clear_header(message->headers + i);
-	CLEAR(message->headers);
-	message->num_headers = 0;
-	message->body_length = 0;
+	clear_headers(message->headers);
+	message->headers = 0;
+	es_clear(&message->body);
+}
+
+static inline void clear_request_line(HTTP_ReqLine* line)
+{
+	es_clear(&line->domain);
+	es_clear(&line->path);
+}
+
+static inline void clear_response_line(HTTP_RespLine* line)
+{
+	es_clear(&line->phrase);
 }
 
 void clear_request(HTTP_Message* message)
 {
-	CLEAR(message->request.domain);
-	CLEAR(message->request.path);
+	clear_request_line(&message->request);
 	clear_common(message);
 }
 
 void clear_response(HTTP_Message* message)
 {
-	CLEAR(message->response.phrase);
+	clear_response_line(&message->response);
 	clear_common(message);
 }

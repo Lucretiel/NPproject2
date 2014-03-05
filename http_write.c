@@ -5,80 +5,85 @@
  *      Author: nathan
  */
 
-#include <stdlib.h>
+#include <sys/socket.h>
+#include <stdbool.h>
 #include "http.h"
 
 #include "config.h"
 
-//TODO: io error checking
 
-static inline int write_request_line(HTTP_ReqLine* line, FILE* connection)
+static inline int write_ref(StringRef ref, int connection)
 {
-	switch(line->method)
+	return send(connection, ref.begin, ref.size, 0) < 0;
+}
+
+static inline int write_str(String str, int connection)
+{
+	int result = write_ref(es_ref(&str), connection);
+	es_free(&str);
+	return result;
+}
+
+static inline int write_request_line(HTTP_ReqLine* line, int connection)
+{
+	if(write_ref(method_name(line->method), connection)) return 1;
+	if(write_ref(es_temp(" "), connection)) return 1;
+
+	if(line->domain.size)
 	{
-	case head:
-		fputs("HEAD ", connection);
-		break;
-	case get:
-		fputs("GET ", connection);
-		break;
-	case post:
-		fputs("POST ", connection);
-		break;
+		if(write_ref(es_temp("http://"), connection)) return 1;
+		if(write_ref(es_ref(&line->domain), connection)) return 1;
 	}
 
-	if(line->domain)
-		fprintf(connection, "http://%s", line->domain);
-
-	fprintf(connection, "/%s HTTP/1.%c\r\n",
-		line->path ? line->path : "", //optional path
-		line->http_version);
+	if(write_str(es_printf("/%.*s HTTP/1.%c\r\n", ES_STRINGPRINT(&line->path),
+			line->http_version), connection))
+		return 1;
 	return 0;
 }
 
 //Write the response line
-static inline int write_response_line(HTTP_RespLine* line, FILE* connection)
+static inline int write_response_line(HTTP_RespLine* line, int connection)
 {
-	fprintf(connection, "HTTP/1.%c %d %s\r\n",
-		line->http_version,
-		line->status,
-		line->phrase);
+	if(write_str(es_printf("HTTP/1.%c %d %.*s\r\n",
+			line->http_version,
+			line->status,
+			ES_STRINGPRINT(&line->phrase)), connection))
+		return 1;
 	return 0;
 }
 
 //Write a header
-static inline int write_header(HTTP_Header* header, FILE* connection)
+static inline int write_headers(HTTP_Header* header, int connection)
 {
-	fprintf(connection, "%s: %s\r\n",
-		header->name,
-		header->value ? header->value : "");
+	while(header)
+	{
+		if(write_str(es_printf("%.*s: %.*s\r\n",
+				ES_STRINGPRINT(&header->name),
+				ES_STRINGPRINT(&header->value)), connection))
+			return 1;
+		header = header->next;
+	}
 	return 0;
 }
 
 //Write all headers, empty line, and body
 //TODO: support for live forwarding of chunked encoding.
-static inline int write_common(HTTP_Message* message, FILE* connection)
+static inline int write_common(HTTP_Message* message, int connection)
 {
 	//Write headers
-	for(int i = 0; i < message->num_headers; ++i)
-		write_header(message->headers + i, connection);
+	if(write_headers(message->headers, connection)) return 1;
 
 	//Write blank line
-	fputs("\r\n", connection);
+	if(write_ref(es_temp("\r\n"), connection)) return 1;
 
 	//Write body
-	if(message->body)
-		fwrite(message->body, sizeof(char), message->body_length, connection);
-
-	//flush
-	if(flush_http_messages)
-		fflush(connection);
+	if(write_ref(es_ref(&message->body), connection)) return 1;
 
 	return 0;
 }
 
 //Write a whole request
-int write_request(HTTP_Message* request, FILE* connection)
+int write_request(HTTP_Message* request, int connection)
 {
 	if(write_request_line(&request->request, connection))
 		return -1;
@@ -87,7 +92,7 @@ int write_request(HTTP_Message* request, FILE* connection)
 	return 0;
 }
 
-int write_response(HTTP_Message* response, FILE* connection)
+int write_response(HTTP_Message* response, int connection)
 {
 	if(write_response_line(&response->response, connection))
 		return -1;
