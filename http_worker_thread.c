@@ -253,11 +253,6 @@ void* http_worker_thread(void* ptr)
 		submit_debug_c("Checking HTTP");
 
 		//Force shutdown of persistent connections
-		//Add connection:close header for http/1.1
-		//TODO: check for HTTP/1.1 Connection: keep-alive
-		if(thread_data.request.request.http_version == '1')
-			if(!find_header(&thread_data.request, es_temp("Connection")))
-				add_header(&thread_data.request, es_temp("Connection"), es_temp("close"));
 		thread_data.state = cs_close;
 
 		//Check filters
@@ -333,11 +328,12 @@ void* http_worker_thread(void* ptr)
 		 * a prioirty because these errors are all for various forms of
 		 * invalid HTTP response, not valid HTTP responses that are just errors.
 		 */
-		if(
-				read_response_line(&thread_data.response, thread_data.server_fd) ||
-				read_headers(&thread_data.response, thread_data.server_fd) ||
-				read_body(&thread_data.response, thread_data.server_fd))
-			RESPOND_ERROR(502, "Error: error reading response");
+		if(read_response_line(&thread_data.response, thread_data.server_fd))
+			RESPOND_ERROR(502, "Error reading response line");
+		if(read_headers(&thread_data.response, thread_data.server_fd))
+			RESPOND_ERROR(502, "Error reading response headers");
+		if(read_body(&thread_data.response, thread_data.server_fd))
+			RESPOND_ERROR(502, "Error reading response body");
 
 		///////////////////////////////////////////////////////////////////////
 		// SEND RESPONSE

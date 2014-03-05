@@ -141,7 +141,7 @@ inline static int regex_match(const regex_t* regex, RegexMatches matches,
 
 #define CHUNK_REGEX_STR \
 	FULL_ANCHOR( \
-		SUBMATCH(WITHIN(1, 7, CLASS("[:xdigit:]"))) /* SIZE FIELD: 1 */ \
+		SUBMATCH(AT_LEAST_ONE(CLASS("[:xdigit:]"))) /* SIZE FIELD: 1 */ \
 		OPTIONAL(SUBMATCH(";" MANY(CLASS("^\n")))) \
 		CR_LF )
 
@@ -484,23 +484,26 @@ static inline int read_fixed_body(HTTP_Message* message, int connection, size_t 
 static inline int read_chunked_body(HTTP_Message* message, int connection)
 {
 	//length of the next chunk
-	unsigned chunk_length = 0;
+	size_t chunk_length = 0;
 
 	//String to read into
 	String body = es_empty_string;
 
+	//String to read the chunk size lines into
+	String chunk_head = es_empty_string;
+
 	//buffer to read each chunk into. Reused, but reallocated if necessary
 	char* read_buffer = 0;
-	unsigned buffer_size = 0;
+	size_t buffer_size = 0;
 
-	#define RETURN(CODE) { es_free(&body); free(read_buffer); return (CODE); }
+	#define RETURN(CODE) { es_free(&body); es_free(&chunk_head);\
+		free(read_buffer); return (CODE); }
 
 	//Read each chunk till a length 0 chunk
 	do
 	{
 		//Read the chunk length line
-		String chunk_head = tcp_read_line(connection, '\n', MAX_CHUNK_HEADER_SIZE);
-		#define RETURN1(CODE) { es_free(&chunk_head); RETURN(CODE) }
+		chunk_head = tcp_read_line(connection, '\n', MAX_CHUNK_HEADER_SIZE);
 
 		//If the last character isn't a newline
 		if(es_cstrc(&chunk_head)[chunk_head.size-1] != '\n')
@@ -515,34 +518,37 @@ static inline int read_chunked_body(HTTP_Message* message, int connection)
 
 		//Match the chunk length line
 		StringRef matches[chunk_num_matches];
-		if(regex_match(&request_regex, matches, es_ref(&chunk_head),
-				request_num_matches))
-			RETURN1(malformed_line)
+		if(regex_match(&chunk_regex, matches, es_ref(&chunk_head),
+				chunk_num_matches))
+			RETURN(malformed_line)
 
 		//Get the chunk length. Remember- it's hex, not decimal
 		chunk_length = strtoul(REGEX_PART(chunk_match_size).begin, 0, 16);
 
 		//self explanatory
-		if(chunk_length > MAX_CHUNK_SIZE) RETURN1(too_long)
+		if(chunk_length > MAX_CHUNK_SIZE) RETURN(too_long)
+
+		//For the trailing \r\n
+		size_t full_chunk_length = chunk_length + 2;
 
 		//Reallocate buffer if needed
-		if(chunk_length < buffer_size)
+		if(full_chunk_length > buffer_size)
 		{
 			free(read_buffer);
-			read_buffer = malloc(chunk_length);
-			buffer_size = chunk_length;
+			read_buffer = malloc(full_chunk_length);
+			buffer_size = full_chunk_length;
 		}
 
 		//Read the chunk
-		if(tcp_read_fixed(connection, read_buffer, chunk_length))
-			RETURN1(connection_error)
+		if(tcp_read_fixed(connection, read_buffer, full_chunk_length))
+			RETURN(connection_error)
 
+		//TODO: check that
 		//Append the chunk
 		es_append(&body, es_tempn(read_buffer, chunk_length));
-		#undef RETURN1
 
-		//Free the line
-		es_free(&chunk_head);
+		//Clear the chunk line
+		es_clear(&chunk_head);
 
 	//Repeat until MAX_BODY_SIZE or a length 0 chunk
 	} while(chunk_length != 0 && body.size <= MAX_BODY_SIZE);
@@ -565,7 +571,7 @@ int read_body(HTTP_Message* message, int connection)
 	//Try chunked first. Ignore Content-Length
 	//https://stackoverflow.com/questions/3304126/chunked-encoding-and-content-length-header
 	header = find_header(message, es_temp("Transfer-Encoding"));
-	if(header && es_compare(es_ref(&header->value), es_temp("chunked")))
+	if(header && es_compare(es_ref(&header->value), es_temp("chunked")) == 0)
 		return read_chunked_body(message, connection);
 
 	//Try content-length
