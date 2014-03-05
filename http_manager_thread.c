@@ -13,6 +13,7 @@
 #include "http_manager_thread.h"
 #include "http_worker_thread.h"
 #include "config.h"
+#include "print_thread.h"
 
 /*
  * If this looks like it's copy-pasted from the print_thread.c global queue
@@ -145,10 +146,10 @@ static void* http_manager(void* arg)
 
 static int _manager_status = -1;
 
-__attribute__((constructor))
+__attribute__((constructor (MODULE_HTTP_MANAGE_PRI)))
 void begin_http_manager()
 {
-	if(DEBUG_PRINT) puts("Launching HTTP thread manager");
+	submit_debug_c("Launching HTTP thread manager");
 	manager_data.begin = manager_data.end = 0;
 	manager_data.shutdown = false;
 
@@ -158,13 +159,14 @@ void begin_http_manager()
 	_manager_status = pthread_create(&manager_data.manager, 0, http_manager, 0);
 }
 
-__attribute__((destructor))
+__attribute__((destructor (MODULE_HTTP_MANAGE_PRI)))
 void end_http_manager()
 {
-	if(DEBUG_PRINT) puts("Stopping HTTP thread manager");
 	stop_manager();
 
+	submit_debug_c("Finshing remaining threads");
 	if(_manager_status) pthread_join(manager_data.manager, 0);
+	submit_debug_c("Shutting down HTTP manager");
 
 	pthread_mutex_destroy(&manager_data.lock);
 	pthread_cond_destroy(&manager_data.signal);

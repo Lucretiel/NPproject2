@@ -28,7 +28,7 @@ void filter_add(String filter)
 	filter_front = node;
 }
 
-__attribute__((destructor))
+__attribute__((destructor (MODULE_FILTER_PRI)))
 void deinit_filters()
 {
 	if(DEBUG_PRINT) puts("Clearing filters");

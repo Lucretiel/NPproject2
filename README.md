@@ -54,6 +54,8 @@ why this is needed, as `getaddrinfo` is standard POSIX, but it's needed.
 - Make sure to compile the `*.c` files in the subdirectories.
 - I've included the auto-generated makefiles produced by my IDE in the `Debug`
 and `Release` directories. They work fine from the command line in Ubuntu 12.04
+- Set `DEBUG_PRINT` to 1 in `config.h` to see extended debug output. This will
+also show the cleanup actions taking place when you quit with `SIGUSR2`.
 
 Implementation notes
 --------------------

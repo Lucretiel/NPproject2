@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <errno.h>
+#include <stdlib.h>
 
 #include "config.h"
 #include "server_listener.h"
@@ -19,19 +20,15 @@
 
 typedef struct sockaddr_in SockAddrIn;
 
-sig_atomic_t shutdown_requested;
 
-static void signal_handler(int sig)
+static void print_signal(int sig)
 {
-	switch(sig)
-	{
-	case SIGUSR1:
-		print_stats();
-		break;
-	case SIGUSR2:
-		shutdown_requested = 1;
-		break;
-	}
+	print_stats();
+}
+
+static void quit_signal(int sig)
+{
+	exit(0); //Registered cleanup handlers will ensure clean shutdown
 }
 
 int serve_forever(uint16_t port)
@@ -51,10 +48,9 @@ int serve_forever(uint16_t port)
 	submit_debug_c("Core server beginning");
 
 	submit_debug_c("Installing signal handlers");
-	shutdown_requested = 0;
 
-	signal(SIGUSR1, &signal_handler);
-	signal(SIGUSR2, &signal_handler);
+	signal(SIGUSR1, &print_signal);
+	signal(SIGUSR2, &quit_signal);
 	signal(SIGINT, SIG_IGN);
 
 	#define PRINT_AND_ERROR(MESSAGE) \
@@ -99,7 +95,7 @@ int serve_forever(uint16_t port)
 	//Listen
 	listen(listener_socket, 8);
 
-	while(!shutdown_requested)
+	while(1)
 	{
 		struct sockaddr_in client_addr;
 		socklen_t len = sizeof(client_addr);
@@ -116,8 +112,6 @@ int serve_forever(uint16_t port)
 			handle_connection(client_fd, &client_addr);
 		}
 	}
-
-	submit_debug_c("Cleanly exiting server");
 
 	return 0;
 }

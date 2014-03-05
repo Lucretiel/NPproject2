@@ -31,7 +31,14 @@ const static unsigned long MAX_CHUNK_SIZE = 1024 * 1024;
 const static int MAX_NUM_HEADERS = 1024;
 
 //If true, debug prints will be sent
-const static int DEBUG_PRINT = 0;
+const static int DEBUG_PRINT = 1;
 
 //If true, thread IDs will be added to print output
 const static int PRINT_TID = 0;
+
+//Global init and deinit priorities. Smaller is earlier.
+#define MODULE_STAT_PRI 101
+#define MODULE_FILTER_PRI 101
+#define MODULE_HTTP_REGEX_PRI 101
+#define MODULE_PRINT_PRI 110
+#define MODULE_HTTP_MANAGE_PRI 200

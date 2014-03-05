@@ -167,7 +167,7 @@ void* print_thread(void* arg)
 
 int _print_thread_status = -1;
 
-__attribute__((constructor))
+__attribute__((constructor (MODULE_PRINT_PRI)))
 void begin_print_thread()
 {
 	if(DEBUG_PRINT) puts("Launching print thread");
@@ -183,18 +183,19 @@ void begin_print_thread()
 	_print_thread_status = pthread_create(&queue.printer, 0, &print_thread, 0);
 }
 
-__attribute__((destructor))
+__attribute__((destructor (MODULE_PRINT_PRI)))
 void end_print_thread()
 {
-	if(DEBUG_PRINT) puts("Stopping print thread");
+	if(DEBUG_PRINT) puts("Shutting down print queue");
 	/*
 	 * Shutdown the queue. No more messages can be submitted. Remaining
 	 * messages will be printed.
 	 */
 	shutdown_queue();
 
-	//Wait for the thread
+	if(DEBUG_PRINT) puts("Finishing remaining prints");
 	if(_print_thread_status == 0) pthread_join(queue.printer, 0);
+	if(DEBUG_PRINT) puts("Stopped print thread");
 
 	//Clear sync primitives
 	pthread_mutex_destroy(&queue.mutex);

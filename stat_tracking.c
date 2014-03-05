@@ -30,7 +30,7 @@ static pthread_mutex_t stat_mutex;
 	THING \
 	pthread_mutex_unlock(&stat_mutex);
 
-__attribute__((constructor))
+__attribute__((constructor (MODULE_STAT_PRI)))
 void init_stat_tracking()
 {
 	if(DEBUG_PRINT) puts("Initializing stat tracking");
@@ -38,7 +38,7 @@ void init_stat_tracking()
 	pthread_mutex_init(&stat_mutex, 0);
 }
 
-__attribute__((destructor))
+__attribute__((destructor (MODULE_STAT_PRI)))
 void deinit_stat_tracking()
 {
 	if(DEBUG_PRINT) puts("Deinitializng stat tracking");

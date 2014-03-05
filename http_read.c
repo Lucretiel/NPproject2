@@ -190,7 +190,7 @@ static regex_t chunk_regex; //matches the chunk header line
 	regcomp((COMPONENT), CONTENT, REG_ICASE | REG_EXTENDED)
 
 //Compile regular expressions
-__attribute__((constructor))
+__attribute__((constructor (MODULE_HTTP_REGEX_PRI)))
 void init_http_regex()
 {
 	if(DEBUG_PRINT) puts("Initializing HTTP regex");
@@ -201,7 +201,7 @@ void init_http_regex()
 }
 
 //Uncompile regular expressions
-__attribute__((destructor))
+__attribute__((destructor (MODULE_HTTP_REGEX_PRI)))
 void deinit_http_regex()
 {
 	if(DEBUG_PRINT) puts("Clearing HTTP regex");
