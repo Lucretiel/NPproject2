@@ -411,7 +411,7 @@ static inline int parse_headers(HTTP_Message* message, StringRef header_text)
 int read_headers(HTTP_Message* message, int connection)
 {
 	String headers = es_empty_string;
-	#define RETURN(CODE) { es_free(headers); return (CODE); }
+	#define RETURN(CODE) { es_free(&headers); return (CODE); }
 
 	//Read all the headers, up to a blank line or MAX_HEADER_SIZE
 	int done = 0;

@@ -7,4 +7,13 @@
 
 #pragma once
 
+#include <sys/types.h>
+
+typedef struct
+{
+	int connection_fd;
+	struct sockaddr_in connection_sockaddr;
+} HTTP_Data;
+
+//Send in a pointer to a malloc'd HTTP_Data
 void* http_thread(void* ptr);

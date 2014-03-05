@@ -16,25 +16,15 @@
 
 static inline int write_request_line(HTTP_ReqLine* line, int connection)
 {
-	switch(line->method)
-	{
-	case head:
-		WRITE("HEAD ");
-		break;
-	case get:
-		WRITE("GET ");
-		break;
-	case post:
-		WRITE("POST ");
-		break;
-	}
+	StringRef method = method_name(line->method);
+	WRITE("%.*s ", ES_STRREFPRINT(&method))
 
 	if(line->domain.size)
-		WRITE("http://%.*s", (int)ES_SIZESTRING(&line->domain));
+		WRITE("http://%.*s", ES_STRINGPRINT(&line->domain))
 
 	WRITE("/%.*s HTTP/1.%c\r\n",
-		(int)ES_SIZESTRING(&line->path),
-		line->http_version);
+		ES_STRINGPRINT(&line->path),
+		line->http_version)
 	return 0;
 }
 
@@ -44,7 +34,7 @@ static inline int write_response_line(HTTP_RespLine* line, int connection)
 	WRITE("HTTP/1.%c %d %.*s\r\n",
 		line->http_version,
 		line->status,
-		(int)ES_SIZESTRING(&line->phrase));
+		ES_STRINGPRINT(&line->phrase));
 	return 0;
 }
 
@@ -54,8 +44,8 @@ static inline int write_headers(HTTP_Header* header, int connection)
 	while(header)
 	{
 		WRITE("%.*s: %.*s\r\n",
-			(int)ES_SIZESTRING(&header->name),
-			(int)ES_SIZESTRING(&header->value));
+			ES_STRINGPRINT(&header->name),
+			ES_STRINGPRINT(&header->value));
 		header = header->next;
 	}
 	return 0;
@@ -72,7 +62,7 @@ static inline int write_common(HTTP_Message* message, int connection)
 	WRITE("\r\n");
 
 	//Write body
-	WRITE("%.*s", (int)ES_SIZESTRCNST(&message->body));
+	WRITE("%.*s", ES_STRINGPRINT(&message->body));
 
 	return 0;
 }

@@ -20,11 +20,14 @@
  *     No leading '/' character
  *   http_version: the character '0' or '1', depending on the http version
  */
+
+typedef enum { head, get, post } MethodType;
+
 typedef struct
 {
 	String domain;
 	String path;
-	enum { head, get, post } method;
+	MethodType method;
 	char http_version; //0->1.0, 1->1.1
 } HTTP_ReqLine;
 
@@ -128,14 +131,17 @@ void clear_response(HTTP_Message* message);
 //Find a header.
 const HTTP_Header* find_header(const HTTP_Message* message, StringRef header);
 
+//Get an appropriate phrase for a given response code
+StringRef response_phrase(int code);
+
+//Get the method name
+StringRef method_name(MethodType method);
+
 //Add a header
 void add_header(HTTP_Message* message, StringRef name, StringRef value);
 
 //Set the response code, and an appropriate phrase
 void set_response(HTTP_Message* message, int code);
-
-//Get an appropriate phrase for a given response code
-StringRef response_phrase(int code);
 
 //Set the body and content-length header
 void set_body(HTTP_Message* message, String body);

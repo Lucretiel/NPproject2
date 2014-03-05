@@ -9,6 +9,19 @@
 
 #include "http.h"
 
+#define CASE(CODE, STR) case CODE: return es_temp(STR);
+#define DEFAULT(STR) default: return es_temp(STR);
+
+StringRef method_name(MethodType method)
+{
+	switch(method)
+	{
+	CASE(get, "GET")
+	CASE(head, "HEAD")
+	CASE(post, "POST")
+	}
+}
+
 //Find a header
 const HTTP_Header* find_header(const HTTP_Message* message, StringRef header_name)
 {
@@ -44,9 +57,6 @@ void add_header(HTTP_Message* message, StringRef name, StringRef value)
 
 StringRef response_phrase(int code)
 {
-	//Explicit strlen for compile-time optimizations
-	#define CASE(CODE, STR) case CODE: return es_temp(STR);
-	#define DEFAULT(STR) default: return es_temp(STR);
 	switch(code)
 	{
 		CASE(100, "Continue")
